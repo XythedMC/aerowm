@@ -1,11 +1,11 @@
 use std::{collections::HashMap, ffi::OsString, process::Command, sync::Arc, time::{Duration, Instant}};
 
 use smithay::{
-    backend::{allocator::{Fourcc, dmabuf::Dmabuf, gbm::{GbmAllocator, GbmDevice}}, drm::{DrmDevice, DrmDeviceFd, DrmEvent, DrmSurface, compositor::{DrmCompositor, FrameFlags}, exporter::gbm::GbmFramebufferExporter}, libinput::LibinputInputBackend, renderer::{Color32F, ImportMem, element::{surface::WaylandSurfaceRenderElement, texture::TextureRenderElement}, gles::{GlesPixelProgram, GlesRenderer, GlesTexture, element::PixelShaderElement}}, session::libseat::LibSeatSession, udev::UdevEvent},
-    desktop::{LayerSurface, PopupManager, Space, Window, WindowSurfaceType, layer_map_for_output, space::SpaceRenderElements},
+    backend::{allocator::{Fourcc, dmabuf::Dmabuf, gbm::{GbmAllocator, GbmDevice}}, drm::{DrmDevice, DrmDeviceFd, DrmEvent, compositor::{DrmCompositor, FrameFlags}, exporter::gbm::GbmFramebufferExporter}, renderer::{Color32F, ImportMem, element::{surface::WaylandSurfaceRenderElement, texture::TextureRenderElement}, gles::{GlesPixelProgram, GlesRenderer, GlesTexture, element::PixelShaderElement}}, session::libseat::LibSeatSession},
+    desktop::{LayerSurface, PopupManager, Space, Window, WindowSurfaceType, layer_map_for_output},
     input::{Seat, SeatState, pointer::CursorImageStatus},
     reexports::{
-        calloop::{EventLoop, Interest, LoopSignal, Mode, PostAction, RegistrationToken, generic::Generic}, drm::control::crtc::Handle, gbm::Device, wayland_server::{
+        calloop::{EventLoop, Interest, LoopSignal, Mode, PostAction, RegistrationToken, generic::Generic}, drm::control::crtc::Handle, wayland_server::{
             Display, DisplayHandle, backend::{ClientData, ClientId, DisconnectReason}, protocol::wl_surface::WlSurface
         }
     },

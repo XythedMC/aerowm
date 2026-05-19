@@ -4,12 +4,11 @@ use smithay::{
             element::{AsRenderElements, Kind, surface::WaylandSurfaceRenderElement, texture::{TextureBuffer, TextureRenderElement}}, gles::{
                 GlesPixelProgram, GlesRenderer, GlesTexture, Uniform, UniformName, UniformType, element::PixelShaderElement
             }
-        }, winit::{self, WinitEvent}
-    }, desktop::{Space, Window, layer_map_for_output}, input::pointer::{CursorIcon, CursorImageStatus}, output::{Mode, Output, PhysicalProperties, Subpixel}, reexports::{calloop::EventLoop, winit::dpi::Pixel}, utils::{Logical, Point, Rectangle, Scale, Size, Transform}
+        },
+    }, desktop::{Space, Window}, utils::{Logical, Point, Rectangle, Scale, Size, Transform}
 };
-use xcursor::parser::Image;
 
-use crate::{Treewm, handlers::config::TreeWMConfig, state::{BackgroundType, CanvasWindow, TreewmElement, ViewMode}};
+use crate::{handlers::config::TreeWMConfig, state::{CanvasWindow, TreewmElement, ViewMode}};
 
 pub const LINE_FRAG: &str = r#"
 precision highp float;
@@ -300,7 +299,7 @@ pub fn build_render_elements(
             );
         }
     }
-    
+
     for unfocused_window in unfocused {
         if view_mode == ViewMode::Tiling && !tiling_visible_ids.contains(&unfocused_window.id) {continue;}
         if let Some(geo) = space.element_geometry(&unfocused_window.window) {
