@@ -8,7 +8,7 @@ use smithay::{
         pointer::{AxisFrame, ButtonEvent, CursorIcon, CursorImageStatus, Focus, GrabStartData as PointerGrabStartData, MotionEvent},
     },
     reexports::{wayland_protocols::xdg::shell::server::xdg_toplevel::ResizeEdge, wayland_server::protocol::wl_surface::WlSurface},
-    utils::SERIAL_COUNTER,
+    utils::{Logical, Point, SERIAL_COUNTER},
 };
 
 use crate::{Treewm, grabs::{PanCanvasGrab, ResizeSurfaceGrab}, state::{CanvasWindow, ModifierKey, ViewMode}};
@@ -338,6 +338,16 @@ impl Treewm {
                         }
                     }
                 }
+
+                if self.active_drag {
+                    let (id, _) = self.dragged_window.unwrap();
+                    self.windows.iter_mut().find(|cw| cw.id == id)
+                        .map(|cw| {
+                            cw.canvas_x += event.delta_x();
+                            cw.canvas_y += event.delta_y();
+                    });
+                    self.sync_window_positions();
+                }
             }
             InputEvent::PointerMotionAbsolute { event, .. } => {
                 let output = self.space.outputs().next().expect("No other monitors connected. Either went through all, or none are connected");
@@ -405,6 +415,16 @@ impl Treewm {
             InputEvent::PointerButton { event, .. } => {
                 let pointer = self.seat.get_pointer().expect("No pointer/mouse connected or found");
                 let keyboard = self.seat.get_keyboard().expect("Keyboard not found - this is a bug");
+                let under = self.surface_under(self.cursor_position);
+
+                let mods = keyboard.modifier_state();
+                let main_mod = match self.main_modifier {
+                    ModifierKey::Ctrl => mods.ctrl,
+                    ModifierKey::Alt => mods.alt,
+                    ModifierKey::Shift => mods.shift,
+                    ModifierKey::Super => mods.logo,
+                };
+
                 let serial = SERIAL_COUNTER.next_serial();
                 let button = event.button_code();
                 let button_state = event.state();
@@ -412,6 +432,25 @@ impl Treewm {
                 const BTN_MIDDLE: u32 = 0x112;
                 const BTN_LEFT: u32 = 0x110;
                 
+                if ButtonState::Pressed == button_state && !pointer.is_grabbed()
+                    && button == BTN_LEFT && main_mod && !under.is_none()
+                {
+                    let (wl_surf, _) = under.unwrap();
+                    if let Some(window) = self.windows.iter().find(|cw| {
+                        cw.window   
+                            .toplevel()
+                            .map_or(false, |t| t.wl_surface() == &wl_surf)
+                    }) {
+                        self.active_drag = true;
+                        let offset: Point<f64, Logical> = Point::new(pointer.current_location().x - window.canvas_x, pointer.current_location().y - window.canvas_y);
+                        self.dragged_window = Some((window.id, offset));
+                    }
+                }
+                if ButtonState::Released == button_state && self.active_drag {
+                    self.active_drag = false;
+                    self.dragged_window = None;
+                }
+                    
                 if ButtonState::Pressed == button_state && !pointer.is_grabbed()
                     && button == BTN_MIDDLE
                 {

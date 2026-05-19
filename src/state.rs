@@ -156,6 +156,9 @@ pub struct Treewm {
     pub current_cursor: String,
     pub cursor_texture: Option<GlesTexture>,
 
+    pub active_drag: bool, 
+    pub dragged_window: Option<(u32, Point<f64, Logical>)>,
+
     pub layer_surfaces: Vec<LayerSurface>,
     pub background_type: BackgroundType,
     
@@ -265,6 +268,8 @@ impl Treewm {
             cursor_theme: CursorTheme::load("default"),
             current_cursor: String::from(""),
             cursor_texture: None,
+            active_drag: false,
+            dragged_window: None,
             layer_surfaces,
             background_type,
             tiling_visible_ids: visible_ids,
