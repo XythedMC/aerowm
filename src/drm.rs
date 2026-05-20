@@ -7,11 +7,11 @@ use smithay::{
         egl::{context::EGLContext, display::EGLDisplay},
         libinput::{LibinputInputBackend, LibinputSessionInterface},
         renderer::{Color32F, ImportDma, element::surface::WaylandSurfaceRenderElement, gles::GlesRenderer},
-        session::{Session, libseat::LibSeatSession, Event as SessionEvent},
+        session::{Event as SessionEvent, Session, libseat::LibSeatSession},
         udev::{UdevBackend, UdevEvent},
     },
     desktop::space::SpaceRenderElements,
-    output::{Mode as WlMode, Output, OutputModeSource, PhysicalProperties, Subpixel},
+    output::{Mode as WlMode, Output, OutputModeSource, PhysicalProperties, Scale, Subpixel},
     reexports::{
         calloop::{EventLoop, LoopHandle},
         drm::{buffer::DrmFourcc, control::{Device, connector::State, crtc::Handle}},
@@ -81,9 +81,16 @@ fn open_gpu(
             size: (mw as i32, mh as i32).into(),
             refresh: mode.vrefresh() as i32 * 1000,
         };
-        output.change_current_state(Some(wl_mode), None, None, Some((0, 0).into()));
+        output.change_current_state(
+            Some(wl_mode), 
+            None, 
+            Some(Scale::Fractional(1.0)), 
+            Some((0, 0).into())
+        );
         output.set_preferred(wl_mode);
         output.create_global::<Treewm>(&state.display_handle);
+
+        state.scale = output.current_scale().fractional_scale();
         state.space.map_output(&output, (0, 0));
 
         for &encoder in info.encoders() {
@@ -156,6 +163,9 @@ pub fn init_drm(event_loop: &mut EventLoop<'static, Treewm>, state: &mut Treewm)
                     gpu.drm.activate(true).unwrap();
                     for compositor in gpu.compositors.values_mut() {
                         compositor.reset_buffers();
+                        if state.zoom != 1.0 || state.zoom_animating {
+                            compositor.reset_buffer_ages();
+                        }
                         if let Err(e) = compositor.render_frame(
                             &mut gpu.renderer,
                             &[] as &[SpaceRenderElements<GlesRenderer, WaylandSurfaceRenderElement<GlesRenderer>>],

@@ -1,7 +1,7 @@
 use smithay::{
     backend::{
         renderer::{
-            element::{AsRenderElements, Kind, surface::WaylandSurfaceRenderElement, texture::{TextureBuffer, TextureRenderElement}}, gles::{
+            element::{AsRenderElements, Kind, surface::WaylandSurfaceRenderElement, texture::{TextureBuffer, TextureRenderElement}, utils::RescaleRenderElement}, gles::{
                 GlesPixelProgram, GlesRenderer, GlesTexture, Uniform, UniformName, UniformType, element::PixelShaderElement
             }
         },
@@ -147,7 +147,7 @@ pub fn line_element(prog: &GlesPixelProgram, start: (f32, f32), end: (f32, f32))
     )
 }
 
-pub fn connector_elements(windows: &[CanvasWindow], viewport_x: f64, viewport_y: f64, prog: &GlesPixelProgram) -> Vec<PixelShaderElement> {
+pub fn connector_elements(windows: &[CanvasWindow], zoom: f64, viewport_x: f64, viewport_y: f64, prog: &GlesPixelProgram) -> Vec<PixelShaderElement> {
     windows
         .iter()
         .filter_map(|cw| {
@@ -155,14 +155,15 @@ pub fn connector_elements(windows: &[CanvasWindow], viewport_x: f64, viewport_y:
             let pid    = cw.parent_id?;
             let parent = windows.iter().find(|p| p.id == pid)?;
 
-            let px = (parent.canvas_x - viewport_x) as f32;
-            let py = (parent.canvas_y - viewport_y) as f32;
-            let cx = (cw.canvas_x    - viewport_x) as f32;
-            let cy = (cw.canvas_y    - viewport_y) as f32;
+            let z   = zoom as f32;
+            let px = ((parent.canvas_x - viewport_x) * zoom) as f32;
+            let py = ((parent.canvas_y - viewport_y) * zoom) as f32;
+            let cx = ((cw.canvas_x    - viewport_x) * zoom) as f32;
+            let cy = ((cw.canvas_y    - viewport_y) * zoom) as f32;
 
-            let phw = parent.base_width  as f32 / 2.0;
-            let ph  = parent.base_height as f32;
-            let chw = cw.base_width      as f32 / 2.0;
+            let phw = parent.base_width  as f32 * z / 2.0;
+            let ph  = parent.base_height as f32 * z;
+            let chw = cw.base_width      as f32 * z / 2.0;
 
             // Parent bottom-center → child top-center.
             Some(line_element(prog, (px + phw, py + ph), (cx + chw, cy)))
@@ -179,34 +180,34 @@ pub fn focus_border_elements(
     geo: Rectangle<i32, Logical>
 ) -> PixelShaderElement {
     let fid = focused_window_id;
-    let sx = ((geo.loc.x as f64 - config.border_width as f64) / zoom) as i32;
-    let sy = ((geo.loc.y as f64 - config.border_width as f64) / zoom) as i32;
-    let wh = ((geo.size.h + (config.border_width as i32 * 2)) as f64) as i32;
-    let ww = ((geo.size.w + (config.border_width as i32 * 2)) as f64) as i32;
-    let t = config.border_width;
+    let bw = config.border_width as i32;
+    let sx = geo.loc.x - bw;
+    let sy = geo.loc.y - bw;
+    let ww = (geo.size.w as f64 * zoom) as i32 + bw * 2;
+    let wh = (geo.size.h as f64 * zoom) as i32 + bw * 2;
+    eprintln!("[border] zoom={:.3} geo.loc=({},{}) geo.size={}x{} → border=({},{} {}x{})", zoom, geo.loc.x, geo.loc.y, geo.size.w, geo.size.h, sx, sy, ww, wh);
     let mut color = [0.0, 0.0, 0.0, 1.0];
 
     if Some(cw.id) == fid {
         let [r, g, b] = config.focused_border_color;
         color = [r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0, 1.0];
-    }
-    else {
+    } else {
         let [r, g, b] = config.unfocused_border_color;
         color = [r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0, 1.0];
     }
-    
+
     let area = Rectangle { loc: (sx, sy).into(), size: (ww, wh).into() };
 
     PixelShaderElement::new(
         prog.clone(),
         area,
-        None, // Damage = None means Smithay handles it or we force full redraw
+        None,
         1.0,
         vec![
             Uniform::new("u_color", color),
-            Uniform::new("elem_size", (ww as f32 * zoom as f32, wh as f32 * zoom as f32)),
+            Uniform::new("elem_size", (ww as f32, wh as f32)),
             Uniform::new("radius", config.corner_rounding),
-            Uniform::new("thickness", t as f32)
+            Uniform::new("thickness", bw as f32)
         ],
         Kind::Unspecified,
     )
@@ -284,18 +285,23 @@ pub fn build_render_elements(
 
     for focused_window in focused {
         if view_mode == ViewMode::Tiling && !tiling_visible_ids.contains(&focused_window.id) {continue;}
-    
+
         if let Some(geo) = space.element_geometry(&focused_window.window) {
+            let phys_loc = geo.loc.to_physical_precise_round(scale);
+            eprintln!("[win-focused] id={} geo.loc=({},{}) geo.size={}x{} phys_loc=({},{}) zoom={:.3}",
+                focused_window.id, geo.loc.x, geo.loc.y, geo.size.w, geo.size.h, phys_loc.x, phys_loc.y, zoom);
             if let Some(prog) = &border_prog {
                 overlays.push(TreewmElement::Shader(focus_border_elements(Some(focused_window.id), config.clone(), zoom, prog, focused_window, geo)));
             }
             overlays.extend(
                 focused_window.window.render_elements::<WaylandSurfaceRenderElement<GlesRenderer>>(
                     renderer,
-                    geo.loc.to_physical_precise_round(scale),
+                    phys_loc,
                     Scale::from(scale),
                     1.0,
-                ).into_iter().map(TreewmElement::Surface)
+                ).into_iter().map(|e| TreewmElement::ScaledSurface(
+                    RescaleRenderElement::from_element(e, phys_loc, Scale::from(zoom))
+                ))
             );
         }
     }
@@ -303,16 +309,21 @@ pub fn build_render_elements(
     for unfocused_window in unfocused {
         if view_mode == ViewMode::Tiling && !tiling_visible_ids.contains(&unfocused_window.id) {continue;}
         if let Some(geo) = space.element_geometry(&unfocused_window.window) {
+            let phys_loc = geo.loc.to_physical_precise_round(scale);
+            eprintln!("[win-unfocused] id={} geo.loc=({},{}) geo.size={}x{} phys_loc=({},{}) zoom={:.3}",
+                unfocused_window.id, geo.loc.x, geo.loc.y, geo.size.w, geo.size.h, phys_loc.x, phys_loc.y, zoom);
             if let Some(prog) = &border_prog {
                 overlays.push(TreewmElement::Shader(focus_border_elements(Some(unfocused_window.id), config.clone(), zoom, prog, unfocused_window, geo)));
             }
             overlays.extend(
                 unfocused_window.window.render_elements::<WaylandSurfaceRenderElement<GlesRenderer>>(
                     renderer,
-                    geo.loc.to_physical_precise_round(scale),
+                    phys_loc,
                     Scale::from(scale),
                     1.0,
-                ).into_iter().map(TreewmElement::Surface)
+                ).into_iter().map(|e| TreewmElement::ScaledSurface(
+                    RescaleRenderElement::from_element(e, phys_loc, Scale::from(zoom))
+                ))
             );
         }
     }
@@ -338,7 +349,7 @@ pub fn build_render_elements(
     }
     if view_mode == ViewMode::TreeView {
         if let Some(prog) = &line_prog {
-            overlays.extend(connector_elements(windows, viewport_x, viewport_y, prog).into_iter().map(TreewmElement::Shader));
+            overlays.extend(connector_elements(windows, zoom, viewport_x, viewport_y, prog).into_iter().map(TreewmElement::Shader));
         }
     }
 

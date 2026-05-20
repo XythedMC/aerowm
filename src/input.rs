@@ -156,7 +156,8 @@ impl Treewm {
 
                         // ── Spawn kitty ────────────────
                         if main_mod && sym == Keysym::Return {
-                            data.launch_terminal();
+                            let terminal = data.config.default_terminal.clone();
+                            data.launch_app(&terminal);
                             return FilterResult::Intercept(());
                         }
 
@@ -231,10 +232,6 @@ impl Treewm {
                             self.zoom = 1.0;
                             self.zoom_target = 1.0;
                             self.zoom_anim_start = 1.0;
-                            if let Some(output) = self.space.outputs().next() {
-                                output.change_current_state(None, None, Some(smithay::output::Scale::Fractional(self.zoom)), None);
-                            }
-
                             ViewMode::Tiling
                         }
                     };
@@ -601,16 +598,15 @@ impl Treewm {
                     self.zoom = (self.zoom * zoom_factor).clamp(0.2, 5.0);
                     self.zoom_target = self.zoom;
 
-                    self.viewport_x += pointer_loc.x - pointer_loc.x * (old_zoom / self.zoom);
-                    self.viewport_y += pointer_loc.y - pointer_loc.y * (old_zoom / self.zoom);
+                    self.viewport_x += pointer_loc.x * (1.0 / old_zoom - 1.0 / self.zoom);
+                    self.viewport_y += pointer_loc.y * (1.0 / old_zoom - 1.0 / self.zoom);
+
                     self.viewport_target_x = self.viewport_x;
                     self.viewport_target_y = self.viewport_y;
                     self.viewport_anim_start_x = self.viewport_x;
                     self.viewport_anim_start_y = self.viewport_y;
 
-                    if let Some(output) = self.space.outputs().next() {
-                        output.change_current_state(None, None, Some(smithay::output::Scale::Fractional(self.zoom)), None);
-                    }
+                    eprintln!("[zoom] self.zoom={:.3}", self.zoom);
                     self.sync_window_positions();
                     return;
                 } else {

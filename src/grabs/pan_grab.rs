@@ -28,9 +28,18 @@ impl PointerGrab<Treewm> for PanCanvasGrab {
     ) {
         handle.motion(data, None, event);
 
+        // Update software cursor position (not updated by PointerMotion during grabs).
+        if let Some(output) = data.space.outputs().next() {
+            if let Some(geo) = data.space.output_geometry(output) {
+                data.cursor_position.x = event.location.x.clamp(geo.loc.x as f64, (geo.loc.x + geo.size.w) as f64);
+                data.cursor_position.y = event.location.y.clamp(geo.loc.y as f64, (geo.loc.y + geo.size.h) as f64);
+            }
+        }
+
+        // Divide screen-pixel delta by zoom so 1 mouse px = 1 screen px of canvas movement.
         let delta = event.location - self.start_data.location;
-        data.viewport_x = self.initial_viewport_x - delta.x;
-        data.viewport_y = self.initial_viewport_y - delta.y;
+        data.viewport_x = self.initial_viewport_x - delta.x / data.zoom;
+        data.viewport_y = self.initial_viewport_y - delta.y / data.zoom;
         // Keep target/anim_start in sync so no animation fights the pan.
         data.viewport_target_x = data.viewport_x;
         data.viewport_target_y = data.viewport_y;

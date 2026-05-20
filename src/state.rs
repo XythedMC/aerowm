@@ -1,21 +1,16 @@
 use std::{collections::HashMap, ffi::OsString, process::Command, sync::Arc, time::{Duration, Instant}};
 
 use smithay::{
-    backend::{allocator::{Fourcc, dmabuf::Dmabuf, gbm::{GbmAllocator, GbmDevice}}, drm::{DrmDevice, DrmDeviceFd, DrmEvent, compositor::{DrmCompositor, FrameFlags}, exporter::gbm::GbmFramebufferExporter}, renderer::{Color32F, ImportMem, element::{surface::WaylandSurfaceRenderElement, texture::TextureRenderElement}, gles::{GlesPixelProgram, GlesRenderer, GlesTexture, element::PixelShaderElement}}, session::libseat::LibSeatSession},
-    desktop::{LayerSurface, PopupManager, Space, Window, WindowSurfaceType, layer_map_for_output},
-    input::{Seat, SeatState, pointer::CursorImageStatus},
-    reexports::{
+    backend::{allocator::{Fourcc, dmabuf::Dmabuf, gbm::{GbmAllocator, GbmDevice}}, drm::{DrmDevice, DrmDeviceFd, DrmEvent, compositor::{DrmCompositor, FrameFlags}, exporter::gbm::GbmFramebufferExporter}, renderer::{Color32F, ImportMem, element::{surface::WaylandSurfaceRenderElement, texture::TextureRenderElement}, gles::{GlesPixelProgram, GlesRenderer, GlesTexture, element::PixelShaderElement}}, session::libseat::LibSeatSession}, desktop::{LayerSurface, PopupManager, Space, Window, WindowSurfaceType, layer_map_for_output}, input::{Seat, SeatState, pointer::CursorImageStatus}, output::Scale, reexports::{
         calloop::{EventLoop, Interest, LoopSignal, Mode, PostAction, RegistrationToken, generic::Generic}, drm::control::crtc::Handle, wayland_server::{
             Display, DisplayHandle, backend::{ClientData, ClientId, DisconnectReason}, protocol::wl_surface::WlSurface
         }
-    },
-    utils::{DeviceFd, Logical, Point, SERIAL_COUNTER, Size},
-    wayland::{
+    }, utils::{DeviceFd, Logical, Point, SERIAL_COUNTER, Size}, wayland::{
         compositor::{CompositorClientState, CompositorState}, cursor_shape::CursorShapeManagerState, dmabuf::{DmabufState, ImportNotifier}, fractional_scale::FractionalScaleManagerState, output::OutputManagerState, selection::{
             data_device::DataDeviceState,
             primary_selection::PrimarySelectionState,
         }, shell::{wlr_layer::WlrLayerShellState, xdg::{XdgShellState, decoration::XdgDecorationState}}, shm::ShmState, socket::ListeningSocketSource, viewporter::ViewporterState, xdg_activation::XdgActivationState,
-    },
+    }
 };
 
 use xcursor::{CursorTheme, parser::parse_xcursor};
@@ -26,7 +21,7 @@ smithay::backend::renderer::element::render_elements! {
     Shader = PixelShaderElement,
     Texture = TextureRenderElement<GlesTexture>,
     Surface = WaylandSurfaceRenderElement<GlesRenderer>,
-
+    ScaledSurface = smithay::backend::renderer::element::utils::RescaleRenderElement<WaylandSurfaceRenderElement<GlesRenderer>>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Default)]
@@ -700,6 +695,9 @@ impl Treewm {
                     }
                 }
 
+                let output_scale_before = self.space.outputs().next().map(|o| o.current_scale().fractional_scale()).unwrap_or(1.0);
+                eprintln!("[render-pre]  zoom={:.3} scale={:.3} output_scale_before={:.3} viewport=({:.1},{:.1})", self.zoom, self.scale, output_scale_before, self.viewport_x, self.viewport_y);
+
                 let elements = build_render_elements(
                     &self.windows,
                     &self.space,
@@ -719,13 +717,17 @@ impl Treewm {
                     &gpu_data.border_prog
                 );
 
+                let output_scale_after = self.space.outputs().next().map(|o| o.current_scale().fractional_scale()).unwrap_or(1.0);
+                eprintln!("[render-post] zoom={:.3} output_scale_after={:.3} n_elements={}", self.zoom, output_scale_after, elements.len());
+
                 let render_frame_result = compositor.render_frame(
-                    renderer, 
-                    &elements, 
-                    Color32F::from([clear_color[0], clear_color[1], clear_color[2], 1.0]), 
+                    renderer,
+                    &elements,
+                    Color32F::from([clear_color[0], clear_color[1], clear_color[2], 1.0]),
                     FrameFlags::empty(),
                 ).expect("Failed to render frame");
 
+                eprintln!("[render-frame] is_empty={}", render_frame_result.is_empty);
                 if !render_frame_result.is_empty {
                     if let Err(e) = compositor.queue_frame(()) {
                         eprintln!("queue_frame error for crtc {:?}: {:?}", handle, e);
@@ -764,15 +766,15 @@ impl Treewm {
     }
     
     // -- Launch Apps --------------------------------
-    pub fn launch_terminal(&mut self) {
+    pub fn launch_app(&mut self, name: &str) {
         let (x, y) = (self.cursor_position.x, self.cursor_position.y);
         let socket_str = self.socket_name.to_string_lossy().to_string();
 
-        match Command::new(self.config.default_terminal.as_str())
+        match Command::new(name)
             .env("WAYLAND_DISPLAY", &socket_str)
             .spawn()
         {
-            Ok(_) => println!("Spawned kitty at ({}, {})", x, y),
+            Ok(_) => println!("Spawned {} at ({}, {})", name,  x, y),
             Err(e) => tracing::error!("Failed to spawn kitty: {}", e),
         }
     }
@@ -803,12 +805,13 @@ impl Treewm {
     }
 
     pub fn sync_window_positions(&mut self) {
+        let zoom = self.zoom;
         let updates: Vec<(Window, i32, i32)> = self
             .windows
             .iter()
             .map(|cw| {
-                let sx = (cw.canvas_x - self.viewport_x) as i32;
-                let sy = (cw.canvas_y - self.viewport_y) as i32;
+                let sx = ((cw.canvas_x - self.viewport_x) * zoom) as i32;
+                let sy = ((cw.canvas_y - self.viewport_y) * zoom) as i32;
                 (cw.window.clone(), sx, sy)
             })
             .collect();
