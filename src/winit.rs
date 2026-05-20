@@ -8,7 +8,7 @@ use smithay::{
     }, desktop::{Window, layer_map_for_output}, input::pointer::{CursorIcon, CursorImageStatus}, output::{Mode, Output, PhysicalProperties, Subpixel}, reexports::calloop::EventLoop, utils::{Rectangle, Transform}
 };
 
-use crate::{Treewm, state::{BackgroundType, TreewmElement}, renderering};
+use crate::{Treewm, state::{BackgroundType, TreewmElement}, rendering};
 
 // ── Shader sources ─────────────────────────────────────────────────────────────
 // compile_custom_pixel_shader prepends "#version 100\n" — do NOT include it here.
@@ -53,9 +53,9 @@ pub fn init_winit(
 
     let mut damage_tracker = OutputDamageTracker::from_output(&output);
 
-    let line_prog  = renderering::compile_line(backend.renderer());
-    let solid_prog = renderering::compile_solid(backend.renderer());
-    let border_prog = renderering::compile_border(backend.renderer());
+    let line_prog  = rendering::compile_line(backend.renderer());
+    let solid_prog = rendering::compile_solid(backend.renderer());
+    let border_prog = rendering::compile_border(backend.renderer());
 
     {
         let formats = backend.renderer().dmabuf_formats();
@@ -113,7 +113,7 @@ pub fn init_winit(
                         let background_color = state.config.background_color;
                         let color = background_color.map(|x| x as f32 / 255.0);
                         
-                        let overlays = renderering::build_render_elements(
+                        let overlays = rendering::build_render_elements(
                             &state.windows,
                             &state.space,
                             state.focused_window_id,

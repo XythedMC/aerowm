@@ -14,7 +14,7 @@ use smithay::{
 };
 
 use xcursor::{CursorTheme, parser::parse_xcursor};
-use crate::{handlers::config::TreeWMConfig, renderering::build_render_elements};
+use crate::{handlers::config::TreeWMConfig, rendering::build_render_elements};
 
 smithay::backend::renderer::element::render_elements! {
     pub TreewmElement <=GlesRenderer>;

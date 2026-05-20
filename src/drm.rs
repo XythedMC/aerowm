@@ -20,7 +20,7 @@ use smithay::{
     utils::Size,
 };
 use rustix::fs::OFlags;
-use crate::{Treewm, renderering, state::{GbmDrmCompositor, GpuData}};
+use crate::{Treewm, rendering, state::{GbmDrmCompositor, GpuData}};
 
 fn open_gpu(
     device_id: u64,
@@ -48,9 +48,9 @@ fn open_gpu(
     let egl_ctx = EGLContext::new(&egl_display).expect("Failed to create EGL context");
     let mut renderer = unsafe { GlesRenderer::new(egl_ctx).expect("Failed to create GLES renderer") };
 
-    let line_prog = renderering::compile_line(&mut renderer);
-    let solid_prog = renderering::compile_solid(&mut renderer);
-    let border_prog = renderering::compile_border(&mut renderer);
+    let line_prog = rendering::compile_line(&mut renderer);
+    let solid_prog = rendering::compile_solid(&mut renderer);
+    let border_prog = rendering::compile_border(&mut renderer);
 
 
     let resources = drm.resource_handles().expect("Failed to get DRM resources");
