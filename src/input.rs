@@ -10,7 +10,7 @@ use smithay::{
     }, reexports::{wayland_protocols::xdg::shell::server::xdg_toplevel::ResizeEdge, wayland_server::protocol::wl_surface::WlSurface}, utils::{Logical, Point, SERIAL_COUNTER},
 };
 
-use crate::{Treewm, grabs::{PanCanvasGrab, ResizeSurfaceGrab}, state::{CanvasWindow, ModifierKey, ViewMode}};
+use crate::{Treewm, grabs::{PanCanvasGrab, ResizeSurfaceGrab}, keybind::Trigger, keybind::Action, state::{CanvasWindow, ModifierKey, ViewMode}};
 impl Treewm {
     fn window_edge_at(
         &self,
@@ -19,8 +19,8 @@ impl Treewm {
     ) -> ResizeEdge {
         let wx = ((cw.canvas_x - self.viewport_x) * self.zoom) as i32;
         let wy = ((cw.canvas_y - self.viewport_y) * self.zoom) as i32;
-        let ww = cw.base_width as i32;
-        let wh = cw.base_height as i32;
+        let ww = (cw.base_width as f64 * self.zoom) as i32;
+        let wh = (cw.base_height as f64 * self.zoom) as i32;
         
         let margin = (8.0 / self.zoom) as i32;
         let in_right  = px >= wx + ww  && px < wx + ww + margin && py >= wy - margin && py <= wy + wh + margin;
@@ -78,11 +78,7 @@ impl Treewm {
                 let time = Event::time_msec(&event);
                 let key_state = event.state();
                 
-                let mut pending_tree_focus: Option<u32> = None;
-                let mut toggle_view_mode = false;
-                let mut focus_zoom_requested = false;
-                let mut snap_to_roots_requested = false;
-                let mut reset_viewport_requested = false;
+                let mut pending_action: Option<Action> = None;
 
                 let keyboard = self.seat.get_keyboard().expect("Keyboard not found while trying to add it");
                 keyboard.input::<(), _>(
@@ -98,217 +94,21 @@ impl Treewm {
 
                         let sym = handle.modified_sym();
                         
-                        let main_modifier = data.main_modifier;
-                        let main_mod = match main_modifier {
-                            ModifierKey::Ctrl => modifiers.ctrl,
-                            ModifierKey::Alt => modifiers.alt,
-                            ModifierKey::Shift => modifiers.shift,
-                            ModifierKey::Super => modifiers.logo,
-                        };
-                        // ── Window resizing (Ctrl + Shift + Arrow) ─────────────
-                        // Must be checked before the plain Ctrl+Arrow pan block.
-                        if main_mod && modifiers.shift {
-                            if let Some(fid) = data.focused_window_id {
-                                if let Some(cw) = data.windows.iter_mut().find(|cw| cw.id == fid) {
-                                    match sym {
-                                        Keysym::Left  => cw.base_width  = (cw.base_width  - 32).max(128),
-                                        Keysym::Right => cw.base_width  =  cw.base_width  + 32,
-                                        Keysym::Up    => cw.base_height = (cw.base_height - 32).max(128),
-                                        Keysym::Down  => cw.base_height =  cw.base_height + 32,
-                                        _ => {}
-                                    }
-                                    data.apply_layout();
+                        for (keybind, action) in &data.config.keybinds {
+                            if let Trigger::Key(keysym)  = keybind.trigger {
+                                if keysym == sym && data.mods_match(&keybind.mods, modifiers) {
+                                    pending_action = Some(action.clone());
                                     return FilterResult::Intercept(());
                                 }
                             }
-                        }
-
-                        // ── Viewport panning (Ctrl + Arrow / Home) ──────────────
-                        if main_mod && !modifiers.shift {
-                            if sym == Keysym::Left {
-                                data.pan(-100.0, 0.0);
-                                return FilterResult::Intercept(());
-                            } else if sym == Keysym::Right {
-                                data.pan(100.0, 0.0);
-                                return FilterResult::Intercept(());
-                            } else if sym == Keysym::Up {
-                                data.pan(0.0, -100.0);
-                                return FilterResult::Intercept(());
-                            } else if sym == Keysym::Down {
-                                data.pan(0.0, 100.0);
-                                return FilterResult::Intercept(());
-                            } else if sym == Keysym::Home {
-                                match data.view_mode {
-                                    ViewMode::Tiling => reset_viewport_requested = true,
-                                    ViewMode::TreeView => snap_to_roots_requested = true,
-                                }
-                                return FilterResult::Intercept(());
-                            }
-                        }
-
-                        // ── Gentle loop stopping ────────────────────
-                        if main_mod && modifiers.alt && sym == Keysym::BackSpace {
-                            fs::remove_file("/tmp/treewm.sock").expect("failed to remove socket file while exiting");
-                            data.loop_signal.stop();
-                            return FilterResult::Intercept(());
-                        }
-
-                        if modifiers.ctrl && modifiers.alt {
-                            match sym {
-                                Keysym::XF86_Switch_VT_1 => data.session.as_mut().unwrap().change_vt(1).unwrap(),
-                                Keysym::XF86_Switch_VT_2 => data.session.as_mut().unwrap().change_vt(2).unwrap(),
-                                Keysym::XF86_Switch_VT_3 => data.session.as_mut().unwrap().change_vt(3).unwrap(),
-                                Keysym::XF86_Switch_VT_4 => data.session.as_mut().unwrap().change_vt(4).unwrap(),
-                                Keysym::XF86_Switch_VT_5 => data.session.as_mut().unwrap().change_vt(5).unwrap(),
-                                Keysym::XF86_Switch_VT_6 => data.session.as_mut().unwrap().change_vt(6).unwrap(),
-                                Keysym::XF86_Switch_VT_7 => data.session.as_mut().unwrap().change_vt(7).unwrap(),
-                                Keysym::XF86_Switch_VT_8 => data.session.as_mut().unwrap().change_vt(8).unwrap(),
-                                Keysym::XF86_Switch_VT_9 => data.session.as_mut().unwrap().change_vt(9).unwrap(),
-                                Keysym::XF86_Switch_VT_10 => data.session.as_mut().unwrap().change_vt(10).unwrap(),
-                                Keysym::XF86_Switch_VT_11 => data.session.as_mut().unwrap().change_vt(11).unwrap(),
-                                Keysym::XF86_Switch_VT_12 => data.session.as_mut().unwrap().change_vt(12).unwrap(),
-                                _ => {}
-                            };
-                            return FilterResult::Intercept(());
-                        }
-
-                        // ── View mode toggle (Ctrl + Space) ─────────────────────
-                        if main_mod && sym == Keysym::space {
-                            toggle_view_mode = true;
-                            return FilterResult::Intercept(());
-                        }
-
-                        // ── Spawn kitty ────────────────
-                        if main_mod && sym == Keysym::Return {
-                            let terminal = data.config.default_apps.get("terminal")
-                                .map(|s| s.as_str())
-                                .unwrap_or_else(|| {
-                                    tracing::warn!("No terminal set in default_apps in the config, falling back to kitty");
-                                    "kitty"    
-                                }).to_owned();
-                            data.launch_app(&terminal);
-                            return FilterResult::Intercept(());
-                        }
-
-                        if main_mod && sym == Keysym::w {
-                            let browser = data.config.default_apps.get("browser")
-                                .map(|s| s.as_str())
-                                .unwrap_or_else(|| {
-                                    tracing::warn!("No terminal set in default_apps in the config, falling back to kitty");
-                                    "kitty"    
-                                }).to_owned();
-                            data.launch_app(&browser);
-                            return FilterResult::Intercept(());
-                        }
-
-                        // ── Tree navigation (Ctrl + P / N / C) ──────────────────
-                        if main_mod {
-                            if sym == Keysym::q {
-                                data.windows
-                                    .iter()
-                                    .find(|cw| cw.id == data.focused_window_id.expect("No focused window to close"))
-                                    .and_then(|cw| cw.window.toplevel()
-                                    .map(|t| t.send_close()));
-                                return FilterResult::Intercept(());
-                            }
-                            if sym == Keysym::p {
-                                pending_tree_focus = data
-                                    .focused_window_id
-                                    .and_then(|fid| {
-                                        data.windows.iter().find(|cw| cw.id == fid)
-                                    })
-                                    .and_then(|cw| cw.parent_id);
-                                return FilterResult::Intercept(());
-                            } else if sym == Keysym::n {
-                                if let Some(fid) = data.focused_window_id {
-                                    let siblings = data.siblings_of(fid);
-                                    if let Some(pos) =
-                                        siblings.iter().position(|&id| id == fid)
-                                    {
-                                        let next = siblings[(pos + 1) % siblings.len()];
-                                        if next != fid {
-                                            pending_tree_focus = Some(next);
-                                        }
-                                    }
-                                }
-                                return FilterResult::Intercept(());
-                            } else if sym == Keysym::c {
-                                pending_tree_focus = data
-                                    .focused_window_id
-                                    .and_then(|fid| {
-                                        data.windows.iter().find(|cw| cw.id == fid)
-                                    })
-                                    .and_then(|cw| cw.children.first().copied());
-                                return FilterResult::Intercept(());
-                            }
-                        }
-
-                        // ── Focus zoom (Ctrl + F, tree view) ────────────────────
-                        if main_mod && sym == Keysym::z {
-                            focus_zoom_requested = true;
-                            return FilterResult::Intercept(());
-                        }
-
-                        if main_mod && sym == Keysym::f {
-                            data.toggle_fullscreen();
-                            return FilterResult::Intercept(())
                         }
 
                         FilterResult::Forward
                     },
                 );
 
-                // Apply view mode toggle (keyboard mutex now released).
-                if toggle_view_mode {
-                    self.view_mode = match self.view_mode {
-                        ViewMode::Tiling => {
-                            self.zoom_anim_start = self.zoom;
-                            self.zoom_target = 0.7;
-                            self.zoom_animating = true;
-                            ViewMode::TreeView
-                        },
-                        ViewMode::TreeView => {
-                            self.tiling_root_id = self.focused_window_id;
-                            self.zoom = 1.0;
-                            self.zoom_target = 1.0;
-                            self.zoom_anim_start = 1.0;
-                            ViewMode::Tiling
-                        }
-                    };
-                    self.apply_layout();
-                    let mode_str = match self.view_mode {
-                        ViewMode::Tiling => "tiling".to_string(),
-                        ViewMode::TreeView => "tree".to_string(),
-                    };
-                    self.emit_event(crate::ipc::IpcEvent::ModeChanged { mode: mode_str });
-                }
-
-                // Apply tree focus change (keyboard mutex now released).
-                if let Some(target_id) = pending_tree_focus {
-                    self.focus_by_id(target_id);
-                    self.tiling_root_id = Some(target_id);
-                    match self.view_mode {
-                        ViewMode::Tiling => self.apply_layout(),
-                        ViewMode::TreeView => self.center_viewport_on_focused(),
-                    }
-                }
-
-                if focus_zoom_requested && self.view_mode == ViewMode::TreeView {
-                    self.focus_zoom();
-                }
-
-                if snap_to_roots_requested {
-                    self.snap_to_roots();
-                }
-
-                if reset_viewport_requested {
-                    self.viewport_x = 0.0;
-                    self.viewport_y = 0.0;
-                    self.viewport_target_x = 0.0;
-                    self.viewport_target_y = 0.0;
-                    self.viewport_anim_start_x = 0.0;
-                    self.viewport_anim_start_y = 0.0;
-                    self.sync_window_positions();
+                if let Some(action) = pending_action {
+                    self.dispatch_action(&action);
                 }
             }
             InputEvent::PointerMotion { event, .. } => {

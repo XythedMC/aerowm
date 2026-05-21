@@ -6,6 +6,7 @@ mod state;
 mod winit;
 mod drm;
 mod rendering;
+mod keybind;
 pub use state::Treewm;
 
 use smithay::reexports::{calloop::EventLoop, wayland_server::Display};

@@ -185,8 +185,6 @@ pub fn focus_border_elements(
     let sy = geo.loc.y - bw;
     let ww = (geo.size.w as f64 * zoom) as i32 + bw * 2;
     let wh = (geo.size.h as f64 * zoom) as i32 + bw * 2;
-    eprintln!("[border] id={} elem=({},{} {}x{}) inner-edge=({},{})",
-        cw.id, sx, sy, ww, wh, sx + bw, sy + bw);
     let mut color = [0.0, 0.0, 0.0, 1.0];
 
     if Some(cw.id) == fid {

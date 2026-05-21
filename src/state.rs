@@ -59,7 +59,7 @@ pub enum ViewMode {
     Tiling,
     TreeView,
 }
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub enum ModifierKey {
     Ctrl,
     Alt,
@@ -379,6 +379,11 @@ impl Treewm {
             .and_then(|cw| cw.window.toplevel().map(|t| t.wl_surface().clone()));
         let keyboard = self.seat.get_keyboard().expect("Keyboard not found - this is a bug");
         keyboard.set_focus(self, surface, serial);
+        self.space.elements().for_each(|w| { w.set_activated(false); });
+        if let Some(cw) = self.windows.iter().find(|cw| cw.id == id) {
+            cw.window.set_activated(true);
+            cw.window.toplevel().unwrap().send_pending_configure();
+        }
     }
 
     /// Clear keyboard focus.
@@ -500,7 +505,7 @@ impl Treewm {
                 cw.base_width = sw - 2 * self.config.tile_distance;                                                                                                                    
                 cw.base_height = sh - 2 * self.config.tile_distance;                                                                                                                   
                 if let Some(tl) = cw.window.toplevel() {
-                    tl.with_pending_state(|s| { s.size = Some((sw, sh).into()); });                                                                    
+                    tl.with_pending_state(|s| { s.size = Some((cw.base_width, cw.base_height).into()); });                                                                    
                     tl.send_pending_configure();                                                                                                       
                 }
             }                                                                                                                                          
@@ -810,7 +815,6 @@ impl Treewm {
             Err(e) => tracing::error!("Failed to spawn kitty: {}", e),
         }
     }
-
     // -- Canvas / viewport ------------------------------
 
     pub fn viewport_center(&self) -> (f64, f64) {
