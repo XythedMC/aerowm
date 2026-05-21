@@ -43,10 +43,10 @@ use smithay::{
 };
 
 use xcursor::{CursorTheme, parser::parse_xcursor};
-use crate::{handlers::config::TreeWMConfig, rendering::build_render_elements};
+use crate::{handlers::config::AeroWMConfig, rendering::build_render_elements};
 
 smithay::backend::renderer::element::render_elements! {
-    pub TreewmElement <=GlesRenderer>;
+    pub AeroWMElement <=GlesRenderer>;
     Shader = PixelShaderElement,
     Texture = TextureRenderElement<GlesTexture>,
     Surface = WaylandSurfaceRenderElement<GlesRenderer>,
@@ -135,7 +135,7 @@ pub struct CanvasWindow {
     pub pre_fullscreen_height: i32,
 }
 
-pub struct Treewm {
+pub struct AeroWM {
     pub start_time: std::time::Instant,
     pub socket_name: OsString,
     pub display_handle: DisplayHandle,
@@ -174,7 +174,7 @@ pub struct Treewm {
     pub zoom: f64,
     pub gap: f64,
 
-    pub config: TreeWMConfig,
+    pub config: AeroWMConfig,
     pub cursor_icon: CursorImageStatus,
     pub cursor_position: Point<f64, Logical>,
     pub cursor_theme: CursorTheme,
@@ -201,7 +201,7 @@ pub struct Treewm {
     pub primary_selection_state: PrimarySelectionState,
     pub shm_state: ShmState,
     pub output_manager_state: OutputManagerState,
-    pub seat_state: SeatState<Treewm>,
+    pub seat_state: SeatState<AeroWM>,
     pub data_device_state: DataDeviceState,
     pub popups: PopupManager,
 
@@ -213,8 +213,8 @@ pub struct Treewm {
     pub pending_dmabufs: Vec<(Dmabuf, ImportNotifier)>,
 }
 
-impl Treewm {
-    pub fn new(event_loop: &mut EventLoop<Self>, display: Display<Self>, config: TreeWMConfig) -> Self {
+impl AeroWM {
+    pub fn new(event_loop: &mut EventLoop<Self>, display: Display<Self>, config: AeroWMConfig) -> Self {
         let start_time = std::time::Instant::now();
         let dh = display.handle();
 
@@ -322,11 +322,11 @@ impl Treewm {
     }
 
     fn init_wayland_listener(
-        display: Display<Treewm>,
+        display: Display<AeroWM>,
         event_loop: &mut EventLoop<Self>,
     ) -> OsString {
         println!("XDG_RUNTIME_DIR = {:?}", std::env::var("XDG_RUNTIME_DIR"));
-        let listening_socket = ListeningSocketSource::with_name("wayland-treewm")
+        let listening_socket = ListeningSocketSource::with_name("wayland-AeroWM")
                 .map_err(|e| { eprintln!("Socket error: {}", e); e })
                 .expect("...");
         let loop_handle = event_loop.handle();
@@ -352,7 +352,7 @@ impl Treewm {
             )
             .expect("Failed to insert display into the loop");
 
-        "wayland-treewm".into()
+        "wayland-AeroWM".into()
     }
 
     // - IDs --------------------------------

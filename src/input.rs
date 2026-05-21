@@ -1,17 +1,15 @@
-use std::fs;
-
 use smithay::{
     backend::{input::{
         AbsolutePositionEvent, Axis, AxisSource, ButtonState, Event, InputBackend, InputEvent,
         KeyState, KeyboardKeyEvent, PointerAxisEvent, PointerButtonEvent, PointerMotionEvent,
-    }, session::Session}, desktop::WindowSurfaceType, input::{
-        keyboard::{FilterResult, Keysym},
+    }}, desktop::WindowSurfaceType, input::{
+        keyboard::{FilterResult},
         pointer::{AxisFrame, ButtonEvent, CursorIcon, CursorImageStatus, Focus, GrabStartData as PointerGrabStartData, MotionEvent},
     }, reexports::{wayland_protocols::xdg::shell::server::xdg_toplevel::ResizeEdge, wayland_server::protocol::wl_surface::WlSurface}, utils::{Logical, Point, SERIAL_COUNTER},
 };
 
-use crate::{Treewm, grabs::{PanCanvasGrab, ResizeSurfaceGrab}, keybind::Trigger, keybind::Action, state::{CanvasWindow, ModifierKey, ViewMode}};
-impl Treewm {
+use crate::{AeroWM, grabs::{PanCanvasGrab, ResizeSurfaceGrab}, keybind::Trigger, keybind::Action, state::{CanvasWindow, ModifierKey, ViewMode}};
+impl AeroWM {
     fn window_edge_at(
         &self,
         cw: &CanvasWindow,

@@ -10,10 +10,10 @@ use smithay::{
                 wayland_protocols::xdg::shell::server::xdg_toplevel::ResizeEdge},
     utils::{Logical, Point},
 };
-use crate::Treewm;
+use crate::AeroWM;
 
 pub struct ResizeSurfaceGrab {
-    pub start_data: PointerGrabStartData<Treewm>,
+    pub start_data: PointerGrabStartData<AeroWM>,
     /// Cached surface so we can find the window in the canvas Vec efficiently.
     pub window_surface: WlSurface,
     /// The size of the window when the drag started.
@@ -24,12 +24,12 @@ pub struct ResizeSurfaceGrab {
     pub last_update: std::time::Instant,
 }
 
-impl PointerGrab<Treewm> for ResizeSurfaceGrab {
+impl PointerGrab<AeroWM> for ResizeSurfaceGrab {
     fn motion(
         &mut self,
-        data: &mut Treewm,
-        handle: &mut PointerInnerHandle<'_, Treewm>,
-        _focus: Option<(<Treewm as smithay::input::SeatHandler>::PointerFocus, Point<f64, Logical>)>,
+        data: &mut AeroWM,
+        handle: &mut PointerInnerHandle<'_, AeroWM>,
+        _focus: Option<(<AeroWM as smithay::input::SeatHandler>::PointerFocus, Point<f64, Logical>)>,
         event: &MotionEvent,
     ) {
         handle.motion(data, None, event);
@@ -102,8 +102,8 @@ impl PointerGrab<Treewm> for ResizeSurfaceGrab {
     }
     fn relative_motion(
         &mut self,
-        data: &mut Treewm,
-        handle: &mut PointerInnerHandle<'_, Treewm>,
+        data: &mut AeroWM,
+        handle: &mut PointerInnerHandle<'_, AeroWM>,
         focus: Option<(WlSurface, Point<f64, Logical>)>,
         event: &RelativeMotionEvent,
     ) {
@@ -112,8 +112,8 @@ impl PointerGrab<Treewm> for ResizeSurfaceGrab {
 
     fn button(
         &mut self,
-        data: &mut Treewm,
-        handle: &mut PointerInnerHandle<'_, Treewm>,
+        data: &mut AeroWM,
+        handle: &mut PointerInnerHandle<'_, AeroWM>,
         event: &ButtonEvent,
     ) {
         handle.button(data, event);
@@ -126,21 +126,21 @@ impl PointerGrab<Treewm> for ResizeSurfaceGrab {
 
     fn axis(
         &mut self,
-        data: &mut Treewm,
-        handle: &mut PointerInnerHandle<'_, Treewm>,
+        data: &mut AeroWM,
+        handle: &mut PointerInnerHandle<'_, AeroWM>,
         details: AxisFrame,
     ) {
         handle.axis(data, details);
     }
 
-    fn frame(&mut self, data: &mut Treewm, handle: &mut PointerInnerHandle<'_, Treewm>) {
+    fn frame(&mut self, data: &mut AeroWM, handle: &mut PointerInnerHandle<'_, AeroWM>) {
         handle.frame(data);
     }
 
     fn gesture_swipe_begin(
         &mut self,
-        data: &mut Treewm,
-        handle: &mut PointerInnerHandle<'_, Treewm>,
+        data: &mut AeroWM,
+        handle: &mut PointerInnerHandle<'_, AeroWM>,
         event: &GestureSwipeBeginEvent,
     ) {
         handle.gesture_swipe_begin(data, event);
@@ -148,8 +148,8 @@ impl PointerGrab<Treewm> for ResizeSurfaceGrab {
 
     fn gesture_swipe_update(
         &mut self,
-        data: &mut Treewm,
-        handle: &mut PointerInnerHandle<'_, Treewm>,
+        data: &mut AeroWM,
+        handle: &mut PointerInnerHandle<'_, AeroWM>,
         event: &GestureSwipeUpdateEvent,
     ) {
         handle.gesture_swipe_update(data, event);
@@ -157,8 +157,8 @@ impl PointerGrab<Treewm> for ResizeSurfaceGrab {
 
     fn gesture_swipe_end(
         &mut self,
-        data: &mut Treewm,
-        handle: &mut PointerInnerHandle<'_, Treewm>,
+        data: &mut AeroWM,
+        handle: &mut PointerInnerHandle<'_, AeroWM>,
         event: &GestureSwipeEndEvent,
     ) {
         handle.gesture_swipe_end(data, event);
@@ -166,8 +166,8 @@ impl PointerGrab<Treewm> for ResizeSurfaceGrab {
 
     fn gesture_pinch_begin(
         &mut self,
-        data: &mut Treewm,
-        handle: &mut PointerInnerHandle<'_, Treewm>,
+        data: &mut AeroWM,
+        handle: &mut PointerInnerHandle<'_, AeroWM>,
         event: &GesturePinchBeginEvent,
     ) {
         handle.gesture_pinch_begin(data, event);
@@ -175,8 +175,8 @@ impl PointerGrab<Treewm> for ResizeSurfaceGrab {
 
     fn gesture_pinch_update(
         &mut self,
-        data: &mut Treewm,
-        handle: &mut PointerInnerHandle<'_, Treewm>,
+        data: &mut AeroWM,
+        handle: &mut PointerInnerHandle<'_, AeroWM>,
         event: &GesturePinchUpdateEvent,
     ) {
         handle.gesture_pinch_update(data, event);
@@ -184,8 +184,8 @@ impl PointerGrab<Treewm> for ResizeSurfaceGrab {
 
     fn gesture_pinch_end(
         &mut self,
-        data: &mut Treewm,
-        handle: &mut PointerInnerHandle<'_, Treewm>,
+        data: &mut AeroWM,
+        handle: &mut PointerInnerHandle<'_, AeroWM>,
         event: &GesturePinchEndEvent,
     ) {
         handle.gesture_pinch_end(data, event);
@@ -193,8 +193,8 @@ impl PointerGrab<Treewm> for ResizeSurfaceGrab {
 
     fn gesture_hold_begin(
         &mut self,
-        data: &mut Treewm,
-        handle: &mut PointerInnerHandle<'_, Treewm>,
+        data: &mut AeroWM,
+        handle: &mut PointerInnerHandle<'_, AeroWM>,
         event: &GestureHoldBeginEvent,
     ) {
         handle.gesture_hold_begin(data, event);
@@ -202,14 +202,14 @@ impl PointerGrab<Treewm> for ResizeSurfaceGrab {
 
     fn gesture_hold_end(
         &mut self,
-        data: &mut Treewm,
-        handle: &mut PointerInnerHandle<'_, Treewm>,
+        data: &mut AeroWM,
+        handle: &mut PointerInnerHandle<'_, AeroWM>,
         event: &GestureHoldEndEvent,
     ) {
         handle.gesture_hold_end(data, event);
     }
 
-    fn unset(&mut self, data: &mut Treewm) {
+    fn unset(&mut self, data: &mut AeroWM) {
         for cw in data.windows.iter_mut() {
             if cw.window
                 .toplevel()
@@ -220,7 +220,7 @@ impl PointerGrab<Treewm> for ResizeSurfaceGrab {
         }
     }
     
-    fn start_data(&self) -> &PointerGrabStartData<Treewm> {
+    fn start_data(&self) -> &PointerGrabStartData<AeroWM> {
         &self.start_data
     }
 }

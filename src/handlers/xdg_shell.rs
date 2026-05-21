@@ -18,9 +18,9 @@ use smithay::{
     },
 };
 
-use crate::{Treewm, grabs::{MoveSurfaceGrab, ResizeSurfaceGrab}, state::{CanvasWindow, ViewMode}};
+use crate::{AeroWM, grabs::{MoveSurfaceGrab, ResizeSurfaceGrab}, state::{CanvasWindow, ViewMode}};
 
-impl XdgShellHandler for Treewm {
+impl XdgShellHandler for AeroWM {
     fn xdg_shell_state(&mut self) -> &mut XdgShellState {
         &mut self.xdg_shell_state
     }
@@ -254,13 +254,13 @@ impl XdgShellHandler for Treewm {
     fn grab(&mut self, _surface: PopupSurface, _seat: wl_seat::WlSeat, _serial: Serial) {}
 }
 
-delegate_xdg_shell!(Treewm);
+delegate_xdg_shell!(AeroWM);
 
 fn check_grab(
-    seat: &Seat<Treewm>,
+    seat: &Seat<AeroWM>,
     surface: &smithay::reexports::wayland_server::protocol::wl_surface::WlSurface,
     serial: Serial,
-) -> Option<PointerGrabStartData<Treewm>> {
+) -> Option<PointerGrabStartData<AeroWM>> {
     let pointer = seat.get_pointer()?;
     if !pointer.has_grab(serial) {
         return None;
@@ -310,7 +310,7 @@ pub fn handle_commit(
     }
 }
 
-impl Treewm {
+impl AeroWM {
     pub fn unconstrain_popup(&self, popup: &PopupSurface) {
         let Ok(root) = find_popup_root_surface(&PopupKind::Xdg(popup.clone())) else {
             return;

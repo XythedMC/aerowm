@@ -20,13 +20,13 @@ use smithay::{
     utils::Size,
 };
 use rustix::fs::OFlags;
-use crate::{Treewm, rendering, state::{GbmDrmCompositor, GpuData}};
+use crate::{AeroWM, rendering, state::{GbmDrmCompositor, GpuData}};
 
 fn open_gpu(
     device_id: u64,
     path: &Path,
-    state: &mut Treewm,
-    handle: &LoopHandle<'static, Treewm>,
+    state: &mut AeroWM,
+    handle: &LoopHandle<'static, AeroWM>,
 ) {
     eprintln!("opening GPU: {:?}", path);
 
@@ -88,7 +88,7 @@ fn open_gpu(
             Some((0, 0).into())
         );
         output.set_preferred(wl_mode);
-        output.create_global::<Treewm>(&state.display_handle);
+        output.create_global::<AeroWM>(&state.display_handle);
 
         state.scale = output.current_scale().fractional_scale();
         state.space.map_output(&output, (0, 0));
@@ -140,7 +140,7 @@ fn open_gpu(
     });
 }
 
-pub fn init_drm(event_loop: &mut EventLoop<'static, Treewm>, state: &mut Treewm) -> anyhow::Result<()> {
+pub fn init_drm(event_loop: &mut EventLoop<'static, AeroWM>, state: &mut AeroWM) -> anyhow::Result<()> {
     eprintln!("Starting DRM init");
     let (session, notifier) = LibSeatSession::new()
         .map_err(|e| { eprintln!("Libseat error: {:?}", e); e })

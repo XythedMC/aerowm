@@ -8,7 +8,7 @@ use smithay::{
     }, desktop::{Space, Window}, utils::{Logical, Point, Rectangle, Scale, Size, Transform}
 };
 
-use crate::{handlers::config::TreeWMConfig, state::{CanvasWindow, TreewmElement, ViewMode}};
+use crate::{handlers::config::AeroWMConfig, state::{CanvasWindow, AeroWMElement, ViewMode}};
 
 pub const LINE_FRAG: &str = r#"
 precision highp float;
@@ -84,7 +84,7 @@ pub fn compile_line(r: &mut GlesRenderer) -> Option<GlesPixelProgram> {
             UniformName::new("elem_size", UniformType::_2f),
         ],
     )
-    .map_err(|e| eprintln!("treewm: line shader compile failed: {e}"))
+    .map_err(|e| eprintln!("AeroWM: line shader compile failed: {e}"))
     .ok()
 }
 
@@ -93,7 +93,7 @@ pub fn compile_solid(r: &mut GlesRenderer) -> Option<GlesPixelProgram> {
         SOLID_FRAG,
         &[UniformName::new("u_color", UniformType::_4f)],
     )
-    .map_err(|e| eprintln!("treewm: solid shader compile failed: {e}"))
+    .map_err(|e| eprintln!("AeroWM: solid shader compile failed: {e}"))
     .ok()
 }
 
@@ -107,7 +107,7 @@ pub fn compile_border(r: &mut GlesRenderer) -> Option<GlesPixelProgram> {
             UniformName::new("u_color", UniformType::_4f),
         ],
     )
-    .map_err(|e| eprintln!("treewm: border shader compile failed: {e}"))
+    .map_err(|e| eprintln!("AeroWM: border shader compile failed: {e}"))
     .ok()
 }
 
@@ -173,7 +173,7 @@ pub fn connector_elements(windows: &[CanvasWindow], zoom: f64, viewport_x: f64, 
 
 pub fn focus_border_elements(
     focused_window_id: Option<u32>,
-    config: TreeWMConfig,
+    config: AeroWMConfig,
     zoom: f64,
     prog: &GlesPixelProgram, 
     cw: &CanvasWindow, 
@@ -236,7 +236,7 @@ pub fn draw_cursor(
     cursor_texture: GlesTexture, 
     renderer: &mut GlesRenderer,
     scale: f64,
-    config: &TreeWMConfig, 
+    config: &AeroWMConfig, 
 ) -> TextureRenderElement<GlesTexture> {
     let buffer = TextureBuffer::from_texture(
         renderer,
@@ -265,21 +265,21 @@ pub fn build_render_elements(
     zoom: f64,
     viewport_x: f64,
     viewport_y: f64,
-    config: &TreeWMConfig,
+    config: &AeroWMConfig,
     cursor_position: Point<f64, Logical>,
     cursor_texture: &Option<GlesTexture>,
     renderer: &mut GlesRenderer,
     line_prog: &Option<GlesPixelProgram>, 
     solid_prog: &Option<GlesPixelProgram>,
     border_prog: &Option<GlesPixelProgram>
-) ->Vec<TreewmElement> {
+) ->Vec<AeroWMElement> {
     // Assemble overlay elements for this frame.
-    let mut overlays: Vec<TreewmElement> = Vec::new();
+    let mut overlays: Vec<AeroWMElement> = Vec::new();
     let (focused, unfocused): (Vec<&CanvasWindow>, Vec<&CanvasWindow>) = windows.iter().partition(|cw| Some(cw.id) == focused_window_id );
     let output = space.outputs().next().unwrap().clone();
 
     if !cursor_texture.is_none() {
-        overlays.push(TreewmElement::Texture(draw_cursor(cursor_position, cursor_texture.clone().expect("cursor image undefined"), renderer, scale, config)));
+        overlays.push(AeroWMElement::Texture(draw_cursor(cursor_position, cursor_texture.clone().expect("cursor image undefined"), renderer, scale, config)));
     }
 
     for focused_window in focused {
@@ -292,7 +292,7 @@ pub fn build_render_elements(
             let surface_phys = (geo.loc - geom_offset).to_physical_precise_round(scale);
             let phys_loc = geo.loc.to_physical_precise_round(scale);
             if let Some(prog) = &border_prog {
-                overlays.push(TreewmElement::Shader(focus_border_elements(Some(focused_window.id), config.clone(), zoom, prog, focused_window, geo)));
+                overlays.push(AeroWMElement::Shader(focus_border_elements(Some(focused_window.id), config.clone(), zoom, prog, focused_window, geo)));
             }
             overlays.extend(
                 focused_window.window.render_elements::<WaylandSurfaceRenderElement<GlesRenderer>>(
@@ -300,7 +300,7 @@ pub fn build_render_elements(
                     surface_phys,
                     Scale::from(scale),
                     1.0,
-                ).into_iter().map(|e| TreewmElement::ScaledSurface(
+                ).into_iter().map(|e| AeroWMElement::ScaledSurface(
                     RescaleRenderElement::from_element(e, phys_loc, Scale::from(zoom))
                 ))
             );
@@ -314,7 +314,7 @@ pub fn build_render_elements(
             let surface_phys = (geo.loc - geom_offset).to_physical_precise_round(scale);
             let phys_loc = geo.loc.to_physical_precise_round(scale);
             if let Some(prog) = &border_prog {
-                overlays.push(TreewmElement::Shader(focus_border_elements(Some(unfocused_window.id), config.clone(), zoom, prog, unfocused_window, geo)));
+                overlays.push(AeroWMElement::Shader(focus_border_elements(Some(unfocused_window.id), config.clone(), zoom, prog, unfocused_window, geo)));
             }
             overlays.extend(
                 unfocused_window.window.render_elements::<WaylandSurfaceRenderElement<GlesRenderer>>(
@@ -322,7 +322,7 @@ pub fn build_render_elements(
                     surface_phys,
                     Scale::from(scale),
                     1.0,
-                ).into_iter().map(|e| TreewmElement::ScaledSurface(
+                ).into_iter().map(|e| AeroWMElement::ScaledSurface(
                     RescaleRenderElement::from_element(e, phys_loc, Scale::from(zoom))
                 ))
             );
@@ -340,17 +340,17 @@ pub fn build_render_elements(
                     loc.to_physical_precise_round(scale),
                     Scale::from(scale),
                     1.0,
-                ).into_iter().map(TreewmElement::Surface)
+                ).into_iter().map(AeroWMElement::Surface)
             );
         }
     }
 
     if let Some(prog) = &solid_prog {
-        overlays.push(TreewmElement::Shader(indicator_element(view_mode, prog)));
+        overlays.push(AeroWMElement::Shader(indicator_element(view_mode, prog)));
     }
     if view_mode == ViewMode::TreeView {
         if let Some(prog) = &line_prog {
-            overlays.extend(connector_elements(windows, zoom, viewport_x, viewport_y, prog).into_iter().map(TreewmElement::Shader));
+            overlays.extend(connector_elements(windows, zoom, viewport_x, viewport_y, prog).into_iter().map(AeroWMElement::Shader));
         }
     }
 

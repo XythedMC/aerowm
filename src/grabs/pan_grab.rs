@@ -10,19 +10,19 @@ use smithay::{
     utils::{Logical, Point},
 };
 
-use crate::Treewm;
+use crate::AeroWM;
 
 pub struct PanCanvasGrab {
-    pub start_data: PointerGrabStartData<Treewm>,
+    pub start_data: PointerGrabStartData<AeroWM>,
     pub initial_viewport_x: f64,
     pub initial_viewport_y: f64,
 }
 
-impl PointerGrab<Treewm> for PanCanvasGrab {
+impl PointerGrab<AeroWM> for PanCanvasGrab {
     fn motion(
         &mut self,
-        data: &mut Treewm,
-        handle: &mut PointerInnerHandle<'_, Treewm>,
+        data: &mut AeroWM,
+        handle: &mut PointerInnerHandle<'_, AeroWM>,
         _focus: Option<(WlSurface, Point<f64, Logical>)>,
         event: &MotionEvent,
     ) {
@@ -50,8 +50,8 @@ impl PointerGrab<Treewm> for PanCanvasGrab {
 
     fn relative_motion(
         &mut self,
-        data: &mut Treewm,
-        handle: &mut PointerInnerHandle<'_, Treewm>,
+        data: &mut AeroWM,
+        handle: &mut PointerInnerHandle<'_, AeroWM>,
         focus: Option<(WlSurface, Point<f64, Logical>)>,
         event: &RelativeMotionEvent,
     ) {
@@ -60,8 +60,8 @@ impl PointerGrab<Treewm> for PanCanvasGrab {
 
     fn button(
         &mut self,
-        data: &mut Treewm,
-        handle: &mut PointerInnerHandle<'_, Treewm>,
+        data: &mut AeroWM,
+        handle: &mut PointerInnerHandle<'_, AeroWM>,
         event: &ButtonEvent,
     ) {
         handle.button(data, event);
@@ -73,21 +73,21 @@ impl PointerGrab<Treewm> for PanCanvasGrab {
 
     fn axis(
         &mut self,
-        data: &mut Treewm,
-        handle: &mut PointerInnerHandle<'_, Treewm>,
+        data: &mut AeroWM,
+        handle: &mut PointerInnerHandle<'_, AeroWM>,
         details: AxisFrame,
     ) {
         handle.axis(data, details);
     }
 
-    fn frame(&mut self, data: &mut Treewm, handle: &mut PointerInnerHandle<'_, Treewm>) {
+    fn frame(&mut self, data: &mut AeroWM, handle: &mut PointerInnerHandle<'_, AeroWM>) {
         handle.frame(data);
     }
 
     fn gesture_swipe_begin(
         &mut self,
-        data: &mut Treewm,
-        handle: &mut PointerInnerHandle<'_, Treewm>,
+        data: &mut AeroWM,
+        handle: &mut PointerInnerHandle<'_, AeroWM>,
         event: &GestureSwipeBeginEvent,
     ) {
         handle.gesture_swipe_begin(data, event);
@@ -95,8 +95,8 @@ impl PointerGrab<Treewm> for PanCanvasGrab {
 
     fn gesture_swipe_update(
         &mut self,
-        data: &mut Treewm,
-        handle: &mut PointerInnerHandle<'_, Treewm>,
+        data: &mut AeroWM,
+        handle: &mut PointerInnerHandle<'_, AeroWM>,
         event: &GestureSwipeUpdateEvent,
     ) {
         handle.gesture_swipe_update(data, event);
@@ -104,8 +104,8 @@ impl PointerGrab<Treewm> for PanCanvasGrab {
 
     fn gesture_swipe_end(
         &mut self,
-        data: &mut Treewm,
-        handle: &mut PointerInnerHandle<'_, Treewm>,
+        data: &mut AeroWM,
+        handle: &mut PointerInnerHandle<'_, AeroWM>,
         event: &GestureSwipeEndEvent,
     ) {
         handle.gesture_swipe_end(data, event);
@@ -113,8 +113,8 @@ impl PointerGrab<Treewm> for PanCanvasGrab {
 
     fn gesture_pinch_begin(
         &mut self,
-        data: &mut Treewm,
-        handle: &mut PointerInnerHandle<'_, Treewm>,
+        data: &mut AeroWM,
+        handle: &mut PointerInnerHandle<'_, AeroWM>,
         event: &GesturePinchBeginEvent,
     ) {
         handle.gesture_pinch_begin(data, event);
@@ -122,8 +122,8 @@ impl PointerGrab<Treewm> for PanCanvasGrab {
 
     fn gesture_pinch_update(
         &mut self,
-        data: &mut Treewm,
-        handle: &mut PointerInnerHandle<'_, Treewm>,
+        data: &mut AeroWM,
+        handle: &mut PointerInnerHandle<'_, AeroWM>,
         event: &GesturePinchUpdateEvent,
     ) {
         handle.gesture_pinch_update(data, event);
@@ -131,8 +131,8 @@ impl PointerGrab<Treewm> for PanCanvasGrab {
 
     fn gesture_pinch_end(
         &mut self,
-        data: &mut Treewm,
-        handle: &mut PointerInnerHandle<'_, Treewm>,
+        data: &mut AeroWM,
+        handle: &mut PointerInnerHandle<'_, AeroWM>,
         event: &GesturePinchEndEvent,
     ) {
         handle.gesture_pinch_end(data, event);
@@ -140,8 +140,8 @@ impl PointerGrab<Treewm> for PanCanvasGrab {
 
     fn gesture_hold_begin(
         &mut self,
-        data: &mut Treewm,
-        handle: &mut PointerInnerHandle<'_, Treewm>,
+        data: &mut AeroWM,
+        handle: &mut PointerInnerHandle<'_, AeroWM>,
         event: &GestureHoldBeginEvent,
     ) {
         handle.gesture_hold_begin(data, event);
@@ -149,16 +149,16 @@ impl PointerGrab<Treewm> for PanCanvasGrab {
 
     fn gesture_hold_end(
         &mut self,
-        data: &mut Treewm,
-        handle: &mut PointerInnerHandle<'_, Treewm>,
+        data: &mut AeroWM,
+        handle: &mut PointerInnerHandle<'_, AeroWM>,
         event: &GestureHoldEndEvent,
     ) {
         handle.gesture_hold_end(data, event);
     }
 
-    fn start_data(&self) -> &PointerGrabStartData<Treewm> {
+    fn start_data(&self) -> &PointerGrabStartData<AeroWM> {
         &self.start_data
     }
 
-    fn unset(&mut self, _data: &mut Treewm) {}
+    fn unset(&mut self, _data: &mut AeroWM) {}
 }

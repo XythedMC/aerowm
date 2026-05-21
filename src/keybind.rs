@@ -1,9 +1,9 @@
-use std::fs::{self, remove_file};
+use std::fs::{remove_file};
 
 use mlua::{ Error };
 use smithay::{backend::session::Session, input::keyboard::{Keysym, ModifiersState, xkb::{KEYSYM_CASE_INSENSITIVE, keysym_from_name}}};
 
-use crate::{Treewm, state::{ModifierKey, ViewMode}};
+use crate::{AeroWM, state::{ModifierKey, ViewMode}};
 
 #[derive(Debug, Clone)]
 pub struct ParsedKeybind {
@@ -108,7 +108,7 @@ pub fn parse_action(action: &str, args: Option<String>) -> Result<Action, Error>
     }
 }
 
-impl Treewm {
+impl AeroWM {
     pub fn dispatch_action(&mut self, action: &Action) {
         match action {
             Action::Close => self.close(),
@@ -117,7 +117,7 @@ impl Treewm {
                 self.launch_app(&cmd);
             }
             Action::Quit => {
-                remove_file("/tmp/treewm.sock").expect("failed to remove socket file while exiting");
+                remove_file("/tmp/AeroWM.sock").expect("failed to remove socket file while exiting");
                 self.loop_signal.stop();
             },
             Action::SwitchView => self.switch_view(),

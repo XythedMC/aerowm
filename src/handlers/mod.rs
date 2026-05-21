@@ -4,7 +4,7 @@ pub mod config;
 pub mod cursor_shape;
 pub mod tablet;
 pub mod layer_shell;
-use crate::Treewm;
+use crate::AeroWM;
 
 use smithay::input::dnd::{DnDGrab, DndGrabHandler, GrabType, Source};
 use smithay::input::pointer::Focus;
@@ -28,12 +28,12 @@ use smithay::backend::allocator::dmabuf::Dmabuf;
 use smithay::{delegate_data_device, delegate_output, delegate_seat, delegate_primary_selection};
 use smithay::{delegate_xdg_decoration, delegate_xdg_activation, delegate_viewporter, delegate_fractional_scale, delegate_dmabuf};
 
-impl SeatHandler for Treewm {
+impl SeatHandler for AeroWM {
     type KeyboardFocus = WlSurface;
     type PointerFocus = WlSurface;
     type TouchFocus = WlSurface;
 
-    fn seat_state(&mut self) -> &mut SeatState<Treewm> {
+    fn seat_state(&mut self) -> &mut SeatState<AeroWM> {
         &mut self.seat_state
     }
 
@@ -53,21 +53,21 @@ impl SeatHandler for Treewm {
     }
 }
 
-delegate_seat!(Treewm);
+delegate_seat!(AeroWM);
 
-impl SelectionHandler for Treewm {
+impl SelectionHandler for AeroWM {
     type SelectionUserData = ();
 }
 
-impl DataDeviceHandler for Treewm {
+impl DataDeviceHandler for AeroWM {
     fn data_device_state(&mut self) -> &mut DataDeviceState {
         &mut self.data_device_state
     }
 }
 
-impl DndGrabHandler for Treewm {}
+impl DndGrabHandler for AeroWM {}
 
-impl WaylandDndGrabHandler for Treewm {
+impl WaylandDndGrabHandler for AeroWM {
     fn dnd_requested<S: Source>(
         &mut self,
         source: S,
@@ -91,19 +91,19 @@ impl WaylandDndGrabHandler for Treewm {
     }
 }
 
-delegate_data_device!(Treewm);
+delegate_data_device!(AeroWM);
 
-impl OutputHandler for Treewm {}
-delegate_output!(Treewm);
+impl OutputHandler for AeroWM {}
+delegate_output!(AeroWM);
 
-impl PrimarySelectionHandler for Treewm {
+impl PrimarySelectionHandler for AeroWM {
     fn primary_selection_state(&mut self) -> &mut PrimarySelectionState {
         &mut self.primary_selection_state
     }
 }
-delegate_primary_selection!(Treewm);
+delegate_primary_selection!(AeroWM);
 
-impl XdgDecorationHandler for Treewm {
+impl XdgDecorationHandler for AeroWM {
     fn new_decoration(&mut self, toplevel: ToplevelSurface) {
         toplevel.with_pending_state(|state| {
             if self.config.client_side_decorations {
@@ -135,19 +135,19 @@ impl XdgDecorationHandler for Treewm {
         toplevel.send_pending_configure();
     }
 }
-delegate_xdg_decoration!(Treewm);
+delegate_xdg_decoration!(AeroWM);
 
-impl XdgActivationHandler for Treewm {
+impl XdgActivationHandler for AeroWM {
     fn activation_state(&mut self) -> &mut XdgActivationState {
         &mut self.activation_state
     }
     fn request_activation(&mut self, _token: XdgActivationToken, _data: XdgActivationTokenData, _surface: WlSurface) {}
 }
-delegate_xdg_activation!(Treewm);
+delegate_xdg_activation!(AeroWM);
 
-delegate_viewporter!(Treewm);
+delegate_viewporter!(AeroWM);
 
-impl FractionalScaleHandler for Treewm {
+impl FractionalScaleHandler for AeroWM {
     fn new_fractional_scale(&mut self, surface: WlSurface) {
         smithay::wayland::compositor::with_states(&surface, |states| {
             smithay::wayland::fractional_scale::with_fractional_scale(states, |fs| {
@@ -156,9 +156,9 @@ impl FractionalScaleHandler for Treewm {
         });
     }
 }
-delegate_fractional_scale!(Treewm);
+delegate_fractional_scale!(AeroWM);
 
-impl DmabufHandler for Treewm {
+impl DmabufHandler for AeroWM {
     fn dmabuf_state(&mut self) -> &mut DmabufState {
         &mut self.dmabuf_state
     }
@@ -167,4 +167,4 @@ impl DmabufHandler for Treewm {
         self.pending_dmabufs.push((dmabuf, notifier));
     }
 }
-delegate_dmabuf!(Treewm);
+delegate_dmabuf!(AeroWM);

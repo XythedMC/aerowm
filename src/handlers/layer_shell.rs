@@ -3,9 +3,9 @@ use smithay::{
     reexports::wayland_server::protocol::wl_output::WlOutput, 
     wayland::shell::wlr_layer::{Layer, LayerSurface, WlrLayerShellHandler},
 };
-use crate::Treewm;
+use crate::AeroWM;
 
-impl WlrLayerShellHandler for Treewm {
+impl WlrLayerShellHandler for AeroWM {
     fn shell_state(&mut self) -> &mut smithay::wayland::shell::wlr_layer::WlrLayerShellState {
         &mut self.wlr_layer_shell_state
     }
@@ -37,4 +37,4 @@ impl WlrLayerShellHandler for Treewm {
     }
 }
 
-delegate_layer_shell!(Treewm);
+delegate_layer_shell!(AeroWM);

@@ -7,7 +7,7 @@ mod winit;
 mod drm;
 mod rendering;
 mod keybind;
-pub use state::Treewm;
+pub use state::AeroWM;
 
 use smithay::reexports::{calloop::EventLoop, wayland_server::Display};
 use tracing_subscriber::EnvFilter;
@@ -20,7 +20,7 @@ fn main() -> anyhow::Result<()>{
         )
         .init();
 
-    // Collect args: treewm [-e cmd [args...]]
+    // Collect args: AeroWM [-e cmd [args...]]
     let args: Vec<String> = std::env::args().collect();
     let startup_cmd: Option<Vec<String>> = {
         let mut iter = args.iter().skip(1);
@@ -33,24 +33,24 @@ fn main() -> anyhow::Result<()>{
     };
 
     let config = match read_config(){
-        Ok(treewm_config) => treewm_config,
+        Ok(aerowm_config) => aerowm_config,
         Err(_) => {
             create_config()?;
             read_config().expect("Failed to read config after initial creation for some weird reason")
         }
     };
 
-    let mut event_loop: EventLoop<Treewm> = EventLoop::try_new().expect("Failed to create event loop");
-    let display: Display<Treewm> = Display::new().unwrap();
+    let mut event_loop: EventLoop<AeroWM> = EventLoop::try_new().expect("Failed to create event loop");
+    let display: Display<AeroWM> = Display::new().unwrap();
 
-    let mut state = Treewm::new(&mut event_loop, display, config);
+    let mut state = AeroWM::new(&mut event_loop, display, config);
 
     let (cmd_tx, cmd_rx) = smithay::reexports::calloop::channel::channel::<ipc::InternalCommand>();
     let (event_tx, event_rx) = tokio::sync::broadcast::channel(16);
 
     state.event_tx = Some(event_tx);
 
-    let socket_path = std::path::PathBuf::from("/tmp/treewm.sock");
+    let socket_path = std::path::PathBuf::from("/tmp/AeroWM.sock");
     std::thread::spawn(move || {
         let rt = tokio::runtime::Runtime::new().unwrap();
         rt.block_on(async {
@@ -81,18 +81,18 @@ fn main() -> anyhow::Result<()>{
     std::env::set_var("CLUTTER_BACKEND",            "wayland");
     std::env::set_var("SDL_VIDEODRIVER",            "wayland");
 
-    eprintln!("treewm: WAYLAND_DISPLAY={socket_str}");
-    eprintln!("treewm: to run apps in this session:");
+    eprintln!("AeroWM: WAYLAND_DISPLAY={socket_str}");
+    eprintln!("AeroWM: to run apps in this session:");
     eprintln!("  WAYLAND_DISPLAY={socket_str} <app>");
-    eprintln!("  or start with:  treewm -e <terminal>");
+    eprintln!("  or start with:  AeroWM -e <terminal>");
 
     // Spawn the startup command (e.g. a terminal) with all Wayland env vars baked in.
     if let Some(cmd) = startup_cmd {
         let (prog, argv) = cmd.split_first().unwrap();
         match std::process::Command::new(prog).args(argv).spawn()
         {
-            Ok(_)  => eprintln!("treewm: spawned: {}", cmd.join(" ")),
-            Err(e) => eprintln!("treewm: failed to spawn '{}': {e}", cmd.join(" ")),
+            Ok(_)  => eprintln!("AeroWM: spawned: {}", cmd.join(" ")),
+            Err(e) => eprintln!("AeroWM: failed to spawn '{}': {e}", cmd.join(" ")),
         }
     }
 

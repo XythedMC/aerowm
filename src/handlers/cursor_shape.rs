@@ -1,6 +1,6 @@
 use smithay::{
     delegate_cursor_shape,
 };
-use crate::Treewm;
+use crate::AeroWM;
 
-delegate_cursor_shape!(Treewm);
+delegate_cursor_shape!(AeroWM);

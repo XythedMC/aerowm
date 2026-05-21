@@ -8,7 +8,7 @@ use smithay::{
     }, desktop::{Window, layer_map_for_output}, input::pointer::{CursorIcon, CursorImageStatus}, output::{Mode, Output, PhysicalProperties, Subpixel}, reexports::calloop::EventLoop, utils::{Rectangle, Transform}
 };
 
-use crate::{Treewm, state::{BackgroundType, TreewmElement}, rendering};
+use crate::{AeroWM, state::{BackgroundType, AeroWMElement}, rendering};
 
 // ── Shader sources ─────────────────────────────────────────────────────────────
 // compile_custom_pixel_shader prepends "#version 100\n" — do NOT include it here.
@@ -19,8 +19,8 @@ use crate::{Treewm, state::{BackgroundType, TreewmElement}, rendering};
 // ── Winit backend init ─────────────────────────────────────────────────────────
 
 pub fn init_winit(
-    event_loop: &mut EventLoop<Treewm>,
-    state: &mut Treewm,
+    event_loop: &mut EventLoop<AeroWM>,
+    state: &mut AeroWM,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let (mut backend, winit) = winit::init()?;
 
@@ -40,7 +40,7 @@ pub fn init_winit(
         },
     );
     state.scale = output.current_scale().fractional_scale();
-    let _global = output.create_global::<Treewm>(&state.display_handle);
+    let _global = output.create_global::<AeroWM>(&state.display_handle);
     output.change_current_state(
         Some(mode),
         Some(Transform::Flipped180),
@@ -59,7 +59,7 @@ pub fn init_winit(
 
     {
         let formats = backend.renderer().dmabuf_formats();
-        let _ = state.dmabuf_state.create_global::<Treewm>(&state.display_handle, formats);
+        let _ = state.dmabuf_state.create_global::<AeroWM>(&state.display_handle, formats);
     }
 
     match backend.renderer().bind_wl_display(&state.display_handle) {
@@ -94,7 +94,7 @@ pub fn init_winit(
                     let pending = std::mem::take(&mut state.pending_dmabufs);
                     for (dmabuf, notifier) in pending {
                         match backend.renderer().import_dmabuf(&dmabuf, None) {
-                            Ok(_) => { let _ = notifier.successful::<Treewm>(); }
+                            Ok(_) => { let _ = notifier.successful::<AeroWM>(); }
                             Err(e) => {
                                 tracing::warn!("dmabuf import failed: {e}");
                                 notifier.failed();
@@ -107,7 +107,7 @@ pub fn init_winit(
                     {
                         let (renderer, mut framebuffer) = match backend.bind() {
                             Ok(v)  => v,
-                            Err(e) => { eprintln!("treewm: bind error: {e}"); return; }
+                            Err(e) => { eprintln!("AeroWM: bind error: {e}"); return; }
                         };
 
                         let background_color = state.config.background_color;
@@ -134,7 +134,7 @@ pub fn init_winit(
 
                         if let Err(e) = smithay::desktop::space::render_output::<
                             _,
-                            TreewmElement,
+                            AeroWMElement,
                             Window,
                             _,
                         >(
@@ -148,13 +148,13 @@ pub fn init_winit(
                             &mut damage_tracker,
                             if state.background_type != BackgroundType::Color { [0.1, 0.1, 0.1, 1.0] } else { [color[0], color[1], color[2], 1.0] },
                         ) {
-                            eprintln!("treewm: render error: {e}");
+                            eprintln!("AeroWM: render error: {e}");
                             return;
                         }
                     }
 
                     if let Err(e) = backend.submit(Some(&[damage])) {
-                        eprintln!("treewm: submit error: {e}");
+                        eprintln!("AeroWM: submit error: {e}");
                         return;
                     }
 

@@ -9,7 +9,7 @@ use dirs::config_dir;
 use crate::{keybind::{Action, ParsedKeybind, parse_action, parse_keybind}};
 
 #[derive(Debug, Clone)]
-pub struct TreeWMConfig {
+pub struct AeroWMConfig {
     pub main_modifier: String,
     pub gap: f64,
     pub focused_border_color: [u8; 3],
@@ -36,11 +36,11 @@ pub struct LaunchRule {
 }
 
 
-pub fn read_config() -> Result<TreeWMConfig, Error> {
+pub fn read_config() -> Result<AeroWMConfig, Error> {
     let config_path = config_dir()
         .ok_or_else(|| Error::runtime("Config directory ($HOME/.config) doesn't exist"))?
-        .join("treewm")
-        .join("treewm.lua");
+        .join("AeroWM")
+        .join("AeroWM.lua");
     eprintln!("config path: {:?}", config_path);
     let contents = read_to_string(config_path)?;
 
@@ -123,7 +123,7 @@ pub fn read_config() -> Result<TreeWMConfig, Error> {
     }
 
 
-    Ok(TreeWMConfig {
+    Ok(AeroWMConfig {
         main_modifier,
         gap,
         focused_border_color,
@@ -147,8 +147,8 @@ pub fn read_config() -> Result<TreeWMConfig, Error> {
 pub fn create_config() -> anyhow::Result<()>  {
     let result_path = config_dir()
         .ok_or_else(|| anyhow!("config path couldn't be found"))?
-        .join("treewm")
-        .join("treewm.lua");
+        .join("aerowm")
+        .join("aerowm.lua");
     eprintln!("config path: {:?}", result_path);
     let default_config = r#"config = {
     main_modifier = "Ctrl",

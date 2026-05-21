@@ -1,7 +1,7 @@
 use smithay::{delegate_tablet_manager, wayland::tablet_manager::TabletSeatHandler};
-use crate::Treewm;
+use crate::AeroWM;
 
-impl TabletSeatHandler for Treewm {
+impl TabletSeatHandler for AeroWM {
     
 }
-delegate_tablet_manager!(Treewm);
+delegate_tablet_manager!(AeroWM);
