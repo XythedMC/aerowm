@@ -185,7 +185,8 @@ pub fn focus_border_elements(
     let sy = geo.loc.y - bw;
     let ww = (geo.size.w as f64 * zoom) as i32 + bw * 2;
     let wh = (geo.size.h as f64 * zoom) as i32 + bw * 2;
-    eprintln!("[border] zoom={:.3} geo.loc=({},{}) geo.size={}x{} → border=({},{} {}x{})", zoom, geo.loc.x, geo.loc.y, geo.size.w, geo.size.h, sx, sy, ww, wh);
+    eprintln!("[border] id={} elem=({},{} {}x{}) inner-edge=({},{})",
+        cw.id, sx, sy, ww, wh, sx + bw, sy + bw);
     let mut color = [0.0, 0.0, 0.0, 1.0];
 
     if Some(cw.id) == fid {
@@ -206,7 +207,7 @@ pub fn focus_border_elements(
         vec![
             Uniform::new("u_color", color),
             Uniform::new("elem_size", (ww as f32, wh as f32)),
-            Uniform::new("radius", config.corner_rounding),
+            Uniform::new("radius", config.corner_rounding * zoom as f32),
             Uniform::new("thickness", bw as f32)
         ],
         Kind::Unspecified,
@@ -285,18 +286,20 @@ pub fn build_render_elements(
 
     for focused_window in focused {
         if view_mode == ViewMode::Tiling && !tiling_visible_ids.contains(&focused_window.id) {continue;}
-
+        eprintln!("[canvas] id={} canvas=({:.0},{:.0}) base={}x{}",
+            focused_window.id, focused_window.canvas_x, focused_window.canvas_y,
+            focused_window.base_width, focused_window.base_height);
         if let Some(geo) = space.element_geometry(&focused_window.window) {
+            let geom_offset = focused_window.window.geometry().loc;
+            let surface_phys = (geo.loc - geom_offset).to_physical_precise_round(scale);
             let phys_loc = geo.loc.to_physical_precise_round(scale);
-            eprintln!("[win-focused] id={} geo.loc=({},{}) geo.size={}x{} phys_loc=({},{}) zoom={:.3}",
-                focused_window.id, geo.loc.x, geo.loc.y, geo.size.w, geo.size.h, phys_loc.x, phys_loc.y, zoom);
             if let Some(prog) = &border_prog {
                 overlays.push(TreewmElement::Shader(focus_border_elements(Some(focused_window.id), config.clone(), zoom, prog, focused_window, geo)));
             }
             overlays.extend(
                 focused_window.window.render_elements::<WaylandSurfaceRenderElement<GlesRenderer>>(
                     renderer,
-                    phys_loc,
+                    surface_phys,
                     Scale::from(scale),
                     1.0,
                 ).into_iter().map(|e| TreewmElement::ScaledSurface(
@@ -309,16 +312,16 @@ pub fn build_render_elements(
     for unfocused_window in unfocused {
         if view_mode == ViewMode::Tiling && !tiling_visible_ids.contains(&unfocused_window.id) {continue;}
         if let Some(geo) = space.element_geometry(&unfocused_window.window) {
+            let geom_offset = unfocused_window.window.geometry().loc;
+            let surface_phys = (geo.loc - geom_offset).to_physical_precise_round(scale);
             let phys_loc = geo.loc.to_physical_precise_round(scale);
-            eprintln!("[win-unfocused] id={} geo.loc=({},{}) geo.size={}x{} phys_loc=({},{}) zoom={:.3}",
-                unfocused_window.id, geo.loc.x, geo.loc.y, geo.size.w, geo.size.h, phys_loc.x, phys_loc.y, zoom);
             if let Some(prog) = &border_prog {
                 overlays.push(TreewmElement::Shader(focus_border_elements(Some(unfocused_window.id), config.clone(), zoom, prog, unfocused_window, geo)));
             }
             overlays.extend(
                 unfocused_window.window.render_elements::<WaylandSurfaceRenderElement<GlesRenderer>>(
                     renderer,
-                    phys_loc,
+                    surface_phys,
                     Scale::from(scale),
                     1.0,
                 ).into_iter().map(|e| TreewmElement::ScaledSurface(

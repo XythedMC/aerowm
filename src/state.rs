@@ -1,15 +1,44 @@
 use std::{collections::HashMap, ffi::OsString, process::Command, sync::Arc, time::{Duration, Instant}};
 
 use smithay::{
-    backend::{allocator::{Fourcc, dmabuf::Dmabuf, gbm::{GbmAllocator, GbmDevice}}, drm::{DrmDevice, DrmDeviceFd, DrmEvent, compositor::{DrmCompositor, FrameFlags}, exporter::gbm::GbmFramebufferExporter}, renderer::{Color32F, ImportMem, element::{surface::WaylandSurfaceRenderElement, texture::TextureRenderElement}, gles::{GlesPixelProgram, GlesRenderer, GlesTexture, element::PixelShaderElement}}, session::libseat::LibSeatSession}, desktop::{LayerSurface, PopupManager, Space, Window, WindowSurfaceType, layer_map_for_output}, input::{Seat, SeatState, pointer::CursorImageStatus}, output::Scale, reexports::{
-        calloop::{EventLoop, Interest, LoopSignal, Mode, PostAction, RegistrationToken, generic::Generic}, drm::control::crtc::Handle, wayland_server::{
-            Display, DisplayHandle, backend::{ClientData, ClientId, DisconnectReason}, protocol::wl_surface::WlSurface
+    backend::{
+        allocator::{Fourcc, dmabuf::Dmabuf, gbm::{GbmAllocator, GbmDevice}}, 
+        drm::{DrmDevice, DrmDeviceFd, DrmEvent, compositor::{DrmCompositor, FrameFlags}, exporter::gbm::GbmFramebufferExporter}, 
+        renderer::{
+            Color32F, 
+            ImportMem, 
+            element::{surface::WaylandSurfaceRenderElement, texture::TextureRenderElement}, 
+            gles::{GlesPixelProgram, GlesRenderer, GlesTexture, element::PixelShaderElement}
+        }, 
+        session::libseat::LibSeatSession
+    }, 
+    desktop::{LayerSurface, PopupManager, Space, Window, WindowSurfaceType, layer_map_for_output}, 
+    input::{Seat, SeatState, pointer::CursorImageStatus}, 
+    reexports::{
+        calloop::{EventLoop, Interest, LoopSignal, Mode, PostAction, RegistrationToken, generic::Generic}, 
+        drm::control::crtc::Handle, wayland_server::{
+            Display, 
+            DisplayHandle, 
+            backend::{ClientData, ClientId, DisconnectReason}, 
+            protocol::wl_surface::WlSurface
         }
-    }, utils::{DeviceFd, Logical, Point, SERIAL_COUNTER, Size}, wayland::{
-        compositor::{CompositorClientState, CompositorState}, cursor_shape::CursorShapeManagerState, dmabuf::{DmabufState, ImportNotifier}, fractional_scale::FractionalScaleManagerState, output::OutputManagerState, selection::{
+    }, 
+    utils::{DeviceFd, Logical, Point, SERIAL_COUNTER, Size}, 
+    wayland::{
+        compositor::{CompositorClientState, CompositorState}, 
+        cursor_shape::CursorShapeManagerState, 
+        dmabuf::{DmabufState, ImportNotifier}, 
+        fractional_scale::FractionalScaleManagerState, 
+        output::OutputManagerState, 
+        selection::{
             data_device::DataDeviceState,
             primary_selection::PrimarySelectionState,
-        }, shell::{wlr_layer::WlrLayerShellState, xdg::{XdgShellState, decoration::XdgDecorationState}}, shm::ShmState, socket::ListeningSocketSource, viewporter::ViewporterState, xdg_activation::XdgActivationState,
+        }, 
+        shell::{wlr_layer::WlrLayerShellState, xdg::{XdgShellState, decoration::XdgDecorationState}}, 
+        shm::ShmState, 
+        socket::ListeningSocketSource, 
+        viewporter::ViewporterState, 
+        xdg_activation::XdgActivationState,
     }
 };
 
@@ -67,6 +96,7 @@ pub struct BackendData {
 }
 
 /// A window with its position on the infinite canvas and its place in the window tree.
+#[derive(Clone)]
 pub struct CanvasWindow {
     pub id: u32,
     pub window: Window,
@@ -655,10 +685,8 @@ impl Treewm {
 
     // -- DRM ---------------------------------------
     pub fn process_drm_event(&mut self, device_id: u64, event: DrmEvent) {
-        eprintln!("process_drm_event called");
         match event {
             DrmEvent::VBlank(handle) => {
-                eprintln!("VBlank fired");
                 self.tick_animation();
 
                 let color = self.config.background_color;
@@ -695,9 +723,6 @@ impl Treewm {
                     }
                 }
 
-                let output_scale_before = self.space.outputs().next().map(|o| o.current_scale().fractional_scale()).unwrap_or(1.0);
-                eprintln!("[render-pre]  zoom={:.3} scale={:.3} output_scale_before={:.3} viewport=({:.1},{:.1})", self.zoom, self.scale, output_scale_before, self.viewport_x, self.viewport_y);
-
                 let elements = build_render_elements(
                     &self.windows,
                     &self.space,
@@ -717,9 +742,6 @@ impl Treewm {
                     &gpu_data.border_prog
                 );
 
-                let output_scale_after = self.space.outputs().next().map(|o| o.current_scale().fractional_scale()).unwrap_or(1.0);
-                eprintln!("[render-post] zoom={:.3} output_scale_after={:.3} n_elements={}", self.zoom, output_scale_after, elements.len());
-
                 let render_frame_result = compositor.render_frame(
                     renderer,
                     &elements,
@@ -727,7 +749,6 @@ impl Treewm {
                     FrameFlags::empty(),
                 ).expect("Failed to render frame");
 
-                eprintln!("[render-frame] is_empty={}", render_frame_result.is_empty);
                 if !render_frame_result.is_empty {
                     if let Err(e) = compositor.queue_frame(()) {
                         eprintln!("queue_frame error for crtc {:?}: {:?}", handle, e);
@@ -770,8 +791,19 @@ impl Treewm {
         let (x, y) = (self.cursor_position.x, self.cursor_position.y);
         let socket_str = self.socket_name.to_string_lossy().to_string();
 
+        let rule = self.config.launch_rules.get(name);
+        let mut cmd = Command::new(name);
+        if let Some(r) = rule {
+            if let Some(args) = &r.args {
+                cmd.args(args.split_whitespace());
+            }
+            if let Some(env) = &r.env {
+                cmd.envs(env);
+            }
+        }
         match Command::new(name)
             .env("WAYLAND_DISPLAY", &socket_str)
+            .env_remove("DISPLAY")
             .spawn()
         {
             Ok(_) => println!("Spawned {} at ({}, {})", name,  x, y),

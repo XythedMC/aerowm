@@ -1,53 +1,76 @@
+use std::fs;
+
 use smithay::{
     backend::{input::{
         AbsolutePositionEvent, Axis, AxisSource, ButtonState, Event, InputBackend, InputEvent,
         KeyState, KeyboardKeyEvent, PointerAxisEvent, PointerButtonEvent, PointerMotionEvent,
-    }, session::Session},
-    input::{
+    }, session::Session}, desktop::WindowSurfaceType, input::{
         keyboard::{FilterResult, Keysym},
         pointer::{AxisFrame, ButtonEvent, CursorIcon, CursorImageStatus, Focus, GrabStartData as PointerGrabStartData, MotionEvent},
-    },
-    reexports::{wayland_protocols::xdg::shell::server::xdg_toplevel::ResizeEdge, wayland_server::protocol::wl_surface::WlSurface},
-    utils::{Logical, Point, SERIAL_COUNTER},
+    }, reexports::{wayland_protocols::xdg::shell::server::xdg_toplevel::ResizeEdge, wayland_server::protocol::wl_surface::WlSurface}, utils::{Logical, Point, SERIAL_COUNTER},
 };
 
 use crate::{Treewm, grabs::{PanCanvasGrab, ResizeSurfaceGrab}, state::{CanvasWindow, ModifierKey, ViewMode}};
-
 impl Treewm {
+    fn window_edge_at(
+        &self,
+        cw: &CanvasWindow,
+        px: i32, py: i32,
+    ) -> ResizeEdge {
+        let wx = ((cw.canvas_x - self.viewport_x) * self.zoom) as i32;
+        let wy = ((cw.canvas_y - self.viewport_y) * self.zoom) as i32;
+        let ww = cw.base_width as i32;
+        let wh = cw.base_height as i32;
+        
+        let margin = (8.0 / self.zoom) as i32;
+        let in_right  = px >= wx + ww  && px < wx + ww + margin && py >= wy - margin && py <= wy + wh + margin;
+        let in_left   = px >= wx - 4*margin       && px < wx      && py >= wy - margin && py <= wy + wh + margin;
+        let in_bottom = py >= wy + wh  && py < wy + wh + margin && px >= wx - margin && px <= wx + ww + margin;
+        let in_top    = py >= wy - 4*margin       && py < wy      && px >= wx - margin && px <= wx + ww + margin;
+
+
+        if      in_right && in_bottom { return ResizeEdge::BottomRight; }
+        else if in_right && in_top { return ResizeEdge::TopRight; }
+        else if in_left && in_top { return ResizeEdge::TopLeft; }
+        else if in_left && in_bottom { return ResizeEdge::BottomLeft; }
+        else if in_right { return ResizeEdge::Right; }
+        else if in_left { return ResizeEdge::Left; }
+        else if in_bottom { return ResizeEdge::Bottom; }
+        else if in_top { return ResizeEdge::Top; }
+        return ResizeEdge::None;
+    } 
+
+    fn cursor_icon_for(
+        &self,
+        px: i32, py: i32,
+    ) -> CursorImageStatus {
+        for window in self.windows.iter().rev() {
+            match self.window_edge_at(window, px, py) {
+                ResizeEdge::None => {
+                    // If the mouse is inside this window's body, we should stop checking background windows
+                    let wx = (window.canvas_x - self.viewport_x) as i32;
+                    let wy = (window.canvas_y - self.viewport_y) as i32;
+                    let ww = window.base_width as i32;
+                    let wh = window.base_height as i32;
+                    if px >= wx && px < wx + ww && py >= wy && py < wy + wh {
+                        break;
+                    }
+                },
+                ResizeEdge::Top         => { return CursorImageStatus::Named(CursorIcon::NResize); }
+                ResizeEdge::Bottom      => { return CursorImageStatus::Named(CursorIcon::SResize);  }
+                ResizeEdge::Left        => { return CursorImageStatus::Named(CursorIcon::WResize);  }
+                ResizeEdge::TopLeft     => { return CursorImageStatus::Named(CursorIcon::NwResize); }
+                ResizeEdge::BottomLeft  => { return CursorImageStatus::Named(CursorIcon::SwResize); }
+                ResizeEdge::Right       => { return CursorImageStatus::Named(CursorIcon::EResize);  }
+                ResizeEdge::TopRight    => { return CursorImageStatus::Named(CursorIcon::NeResize); }
+                ResizeEdge::BottomRight => { return CursorImageStatus::Named(CursorIcon::SeResize); }
+                _ => {}
+            }
+        }
+        CursorImageStatus::default_named()
+    }
+
     pub fn process_input_event<I: InputBackend>(&mut self, event: InputEvent<I>) { 
-        fn window_edge_at(
-            cw: &CanvasWindow,
-            px: i32, py: i32,
-            viewport_x: f64, viewport_y: f64,
-            zoom: f64,
-        ) -> ResizeEdge {
-            let mut edge = ResizeEdge::None;
-            let wx = (cw.canvas_x - viewport_x) as i32;
-            let wy = (cw.canvas_y - viewport_y) as i32;
-            let ww = cw.base_width as i32;
-            let wh = cw.base_height as i32;
-            
-            let margin = (8.0 / zoom) as i32;
-            let in_right  = px >= wx + ww - margin  && px < wx + ww + margin && py >= wy - margin && py <= wy + wh + margin;
-            let in_left   = px >= wx - margin       && px < wx + margin      && py >= wy - margin && py <= wy + wh + margin;
-            let in_bottom = py >= wy + wh - margin  && py < wy + wh + margin && px >= wx - margin && px <= wx + ww + margin;
-            let in_top    = py >= wy - margin       && py < wy + margin      && px >= wx - margin && px <= wx + ww + margin;
-
-            
-            eprintln!("zoom={zoom:.3} px={px} py={py} | wx={wx} wx+ww={} wy={wy} wy+wh={} margin={margin} | l={in_left} r={in_right} t={in_top} b={in_bottom}",
-                wx+ww, wy+wh);
-
-            if      in_right && in_bottom { edge = ResizeEdge::BottomRight; }
-            else if in_right && in_top { edge = ResizeEdge::TopRight; }
-            else if in_left && in_top { edge = ResizeEdge::TopLeft; }
-            else if in_left && in_bottom { edge = ResizeEdge::BottomLeft; }
-            else if in_right { edge = ResizeEdge::Right; }
-            else if in_left { edge = ResizeEdge::Left; }
-            else if in_bottom { edge = ResizeEdge::Bottom; }
-            else if in_top { edge = ResizeEdge::Top; }
-            return edge;
-        } 
-
         match event {
             InputEvent::Keyboard { event, .. } => {
                 
@@ -125,6 +148,7 @@ impl Treewm {
 
                         // ── Gentle loop stopping ────────────────────
                         if main_mod && modifiers.alt && sym == Keysym::BackSpace {
+                            fs::remove_file("/tmp/treewm.sock").expect("failed to remove socket file while exiting");
                             data.loop_signal.stop();
                             return FilterResult::Intercept(());
                         }
@@ -156,8 +180,24 @@ impl Treewm {
 
                         // ── Spawn kitty ────────────────
                         if main_mod && sym == Keysym::Return {
-                            let terminal = data.config.default_terminal.clone();
+                            let terminal = data.config.default_apps.get("terminal")
+                                .map(|s| s.as_str())
+                                .unwrap_or_else(|| {
+                                    tracing::warn!("No terminal set in default_apps in the config, falling back to kitty");
+                                    "kitty"    
+                                }).to_owned();
                             data.launch_app(&terminal);
+                            return FilterResult::Intercept(());
+                        }
+
+                        if main_mod && sym == Keysym::w {
+                            let browser = data.config.default_apps.get("browser")
+                                .map(|s| s.as_str())
+                                .unwrap_or_else(|| {
+                                    tracing::warn!("No terminal set in default_apps in the config, falling back to kitty");
+                                    "kitty"    
+                                }).to_owned();
+                            data.launch_app(&browser);
                             return FilterResult::Intercept(());
                         }
 
@@ -274,68 +314,15 @@ impl Treewm {
             InputEvent::PointerMotion { event, .. } => {
                 let output = self.space.outputs().next().expect("No other monitors connected. Either went through all, or none are connected");
                 let output_geo = self.space.output_geometry(output).expect("Monitor connected but not fully configured, so geometry couldnt be drawn");
-
-                self.cursor_position += event.delta();
-                self.cursor_position.x = self.cursor_position.x.clamp(output_geo.loc.x as f64, (output_geo.loc.x + output_geo.size.w) as f64);
-                self.cursor_position.y = self.cursor_position.y.clamp(output_geo.loc.y as f64, (output_geo.loc.y + output_geo.size.h) as f64);
-
+                
                 let serial = SERIAL_COUNTER.next_serial();
                 let keyboard = self.seat.get_keyboard().expect("Keyboard not found - this is a bug");
                 let pointer = self.seat.get_pointer().expect("No pointer/mouse connected or found");
-                let under = self.surface_under(self.cursor_position);
-                pointer.motion(
-                    self,
-                    under.clone(),
-                    &MotionEvent {
-                        location: self.cursor_position,
-                        serial,
-                        time: event.time_msec(),
-                    },
-                );
-                pointer.frame(self);
-                {
-                    let mut new_icon = CursorImageStatus::default_named();
-                    let px = pointer.current_location().x as i32;
-                    let py = pointer.current_location().y as i32;
-                    for window in self.windows.iter().rev() {
-                        match window_edge_at(window, px, py, self.viewport_x, self.viewport_y, self.zoom) {
-                            ResizeEdge::None => {
-                                // If the mouse is inside this window's body, we should stop checking background windows
-                                let wx = (window.canvas_x - self.viewport_x) as i32;
-                                let wy = (window.canvas_y - self.viewport_y) as i32;
-                                let ww = window.base_width as i32;
-                                let wh = window.base_height as i32;
-                                if px >= wx && px < wx + ww && py >= wy && py < wy + wh {
-                                    break;
-                                }
-                            },
-                            ResizeEdge::Top         => { new_icon = CursorImageStatus::Named(CursorIcon::NResize);  break; }
-                            ResizeEdge::Bottom      => { new_icon = CursorImageStatus::Named(CursorIcon::SResize);  break; }
-                            ResizeEdge::Left        => { new_icon = CursorImageStatus::Named(CursorIcon::WResize);  break; }
-                            ResizeEdge::TopLeft     => { new_icon = CursorImageStatus::Named(CursorIcon::NwResize); break; }
-                            ResizeEdge::BottomLeft  => { new_icon = CursorImageStatus::Named(CursorIcon::SwResize); break; }
-                            ResizeEdge::Right       => { new_icon = CursorImageStatus::Named(CursorIcon::EResize);  break; }
-                            ResizeEdge::TopRight    => { new_icon = CursorImageStatus::Named(CursorIcon::NeResize); break; }
-                            ResizeEdge::BottomRight => { new_icon = CursorImageStatus::Named(CursorIcon::SeResize); break; }
-                            _ => {}
-                        }
-                    }
-                    self.cursor_icon = new_icon;
-                }
-                if let Some((wl_surf, _)) = under {    
-                    if let Some(window) = self.windows.iter().find(|cw| {
-                        cw.window   
-                            .toplevel()
-                            .map_or(false, |t| t.wl_surface() == &wl_surf)
-                    }) {
-                        let window_id = window.id;
-                        if self.config.hover_to_focus {
-                            keyboard.set_focus(self, Some(wl_surf.clone()), serial);
-                            self.focused_window_id = Some(window_id);
-                        }
-                    }
-                }
-
+                
+                self.cursor_position += event.delta();
+                self.cursor_position.x = self.cursor_position.x.clamp(output_geo.loc.x as f64, (output_geo.loc.x + output_geo.size.w) as f64);
+                self.cursor_position.y = self.cursor_position.y.clamp(output_geo.loc.y as f64, (output_geo.loc.y + output_geo.size.h) as f64);
+                
                 if self.active_drag {
                     let (id, _) = self.dragged_window.unwrap();
                     self.windows.iter_mut().find(|cw| cw.id == id)
@@ -344,6 +331,93 @@ impl Treewm {
                             cw.canvas_y += event.delta_y();
                     });
                     self.sync_window_positions();
+                    pointer.motion(self, None, &MotionEvent {
+                        location: self.cursor_position,
+                        serial,
+                        time: event.time_msec(),
+                    });
+                    pointer.frame(self);
+                    return;
+                }
+                if pointer.is_grabbed() {
+                    pointer.motion(self, None, &MotionEvent {
+                        location: self.cursor_position,
+                        serial,
+                        time: event.time_msec(),
+                    });
+                    pointer.frame(self);
+                    return;
+                }
+
+                self.cursor_icon = self.cursor_icon_for(
+                    pointer.current_location().x as i32, 
+                    pointer.current_location().y as i32, 
+                );
+
+                let canvas_cx = self.cursor_position.x / self.zoom + self.viewport_x;
+                let canvas_cy = self.cursor_position.y / self.zoom + self.viewport_y;
+
+                let Some(window) = self.windows.iter().find(|cw| {
+                    (cw.canvas_x..(cw.canvas_x + cw.base_width as f64)).contains(&canvas_cx) &&
+                    (cw.canvas_y..(cw.canvas_y + cw.base_height as f64)).contains(&canvas_cy)
+                }) else {
+                    pointer.motion(
+                        self,
+                        None,
+                        &MotionEvent {
+                            location: self.cursor_position,
+                            serial,
+                            time: event.time_msec(),
+                        }
+                    );
+                    pointer.frame(self);
+                    return;
+                };
+
+                let local_x = self.cursor_position.x / self.zoom - (window.canvas_x - self.viewport_x);
+                let local_y = self.cursor_position.y / self.zoom - (window.canvas_y - self.viewport_y);
+
+                let local: Point<f64, Logical> = Point::new(local_x, local_y);
+                let Some((surf, p)) = window.window.surface_under(local, WindowSurfaceType::ALL) else {
+                    pointer.motion(
+                        self,
+                        None,
+                        &MotionEvent {
+                            location: self.cursor_position,
+                            serial,
+                            time: event.time_msec(),
+                        }
+                    );
+                    pointer.frame(self);
+                    return;
+                };
+
+                let global_pos = Point::new(
+                    self.cursor_position.x - local_x + p.x as f64,
+                    self.cursor_position.y - local_y + p.y as f64,
+                );
+                let under = (surf, global_pos);
+
+                pointer.motion(
+                    self,
+                    Some(under.clone()),
+                    &MotionEvent {
+                        location: self.cursor_position,
+                        serial,
+                        time: event.time_msec(),
+                    },
+                );
+                pointer.frame(self);
+                if let Some(window) = self.windows.iter().find(|cw| {
+                    cw.window
+                        .toplevel()
+                        .map_or(false, |t| t.wl_surface() == &under.0)
+                }) {
+                    let window_id = window.id;
+                    if self.config.hover_to_focus {
+                        keyboard.set_focus(self, Some(under.0.clone()), serial);
+                        self.focused_window_id = Some(window_id);
+                    }
                 }
             }
             InputEvent::PointerMotionAbsolute { event, .. } => {
@@ -366,35 +440,12 @@ impl Treewm {
                     },
                 );
                 pointer.frame(self);
-                {
-                    let mut new_icon = CursorImageStatus::default_named();
-                    let px = pointer.current_location().x as i32;
-                    let py = pointer.current_location().y as i32;
-                    for window in self.windows.iter().rev() {
-                        match window_edge_at(window, px, py, self.viewport_x, self.viewport_y, self.zoom) {
-                            ResizeEdge::None => {
-                                // If the mouse is inside this window's body, we should stop checking background windows
-                                let wx = (window.canvas_x - self.viewport_x) as i32;
-                                let wy = (window.canvas_y - self.viewport_y) as i32;
-                                let ww = window.base_width as i32;
-                                let wh = window.base_height as i32;
-                                if px >= wx && px < wx + ww && py >= wy && py < wy + wh {
-                                    break;
-                                }
-                            },
-                            ResizeEdge::Top         => { new_icon = CursorImageStatus::Named(CursorIcon::NResize);  break; }
-                            ResizeEdge::Bottom      => { new_icon = CursorImageStatus::Named(CursorIcon::SResize);  break; }
-                            ResizeEdge::Left        => { new_icon = CursorImageStatus::Named(CursorIcon::WResize);  break; }
-                            ResizeEdge::TopLeft     => { new_icon = CursorImageStatus::Named(CursorIcon::NwResize); break; }
-                            ResizeEdge::BottomLeft  => { new_icon = CursorImageStatus::Named(CursorIcon::SwResize); break; }
-                            ResizeEdge::Right       => { new_icon = CursorImageStatus::Named(CursorIcon::EResize);  break; }
-                            ResizeEdge::TopRight    => { new_icon = CursorImageStatus::Named(CursorIcon::NeResize); break; }
-                            ResizeEdge::BottomRight => { new_icon = CursorImageStatus::Named(CursorIcon::SeResize); break; }
-                            _ => {}
-                        }
-                    }
-                    self.cursor_icon = new_icon;
-                }
+                
+                self.cursor_icon = self.cursor_icon_for(
+                    pointer.current_location().x as i32, 
+                    pointer.current_location().y as i32, 
+                );
+                
                 if let Some((wl_surf, _)) = under {    
                     if let Some(window) = self.windows.iter().find(|cw| {
                         cw.window   
@@ -467,21 +518,13 @@ impl Treewm {
                     let px = pointer.current_location().x as i32;
                     let py = pointer.current_location().y as i32;
                     let found = self.windows.iter().rev().find_map(|cw| {
-                        match window_edge_at(cw, px, py, self.viewport_x, self.viewport_y, self.zoom) {
+                        match self.window_edge_at(cw, px, py) {
                             ResizeEdge::None => {
                                 let wx = (cw.canvas_x - self.viewport_x) as i32;
                                 let wy = (cw.canvas_y - self.viewport_y) as i32;
                                 let ww = cw.base_width as i32;
                                 let wh = cw.base_height as i32;
-                                if px >= wx && px < wx + ww && py >= wy && py < wy + wh {
-                                    // Hack to stop find_map: return a special marker? No, find_map only stops on Some.
-                                    // If we are inside the window body, we shouldn't resize.
-                                    // Wait, if we return Some with a fake value, we can handle it outside.
-                                    // Let's just return Some((cw.id, ResizeEdge::None))
-                                    Some((cw.id, ResizeEdge::None))
-                                } else {
-                                    None
-                                }
+                                if px >= wx && px < wx + ww && py >= wy && py < wy + wh { Some((cw.id, ResizeEdge::None)) } else { None }
                             },
                             edge => Some((cw.id, edge)),
                         }
@@ -513,15 +556,35 @@ impl Treewm {
                                 last_update: std::time::Instant::now(),
                             };
                             pointer.set_grab(self, grab, serial, Focus::Clear);
+                        } else {
+                            // cursor is over window body — focus it
+                            let cw = self.windows.iter().find(|w| w.id == cw_id).unwrap();
+                            let wl_surf = cw.window.toplevel().unwrap().wl_surface().clone();
+                            self.space.raise_element(&cw.window, true);
+                            keyboard.set_focus(self, Some(wl_surf.clone()), serial);
+                            self.focused_window_id = Some(cw_id);
                         }
-                    }                } else if ButtonState::Pressed == button_state && !pointer.is_grabbed() {
-                    if let Some((window, _loc)) = self
-                        .space
-                        .element_under(pointer.current_location())
-                        .map(|(w, l)| (w.clone(), l))
-                    {
-                        self.space.raise_element(&window, true);
-                        let wl_surf = window.toplevel().expect("Couldn't get ToplevelSurface as window is a popup").wl_surface().clone();
+                    } else {
+                        // cursor over empty canvas — deselect
+                        self.space.elements().for_each(|w| {
+                            w.set_activated(false);
+                            w.toplevel().unwrap().send_pending_configure();
+                        });
+                        keyboard.set_focus(self, Option::<WlSurface>::None, serial);
+                        self.focused_window_id = None;
+                    }            
+                } else if ButtonState::Pressed == button_state && !pointer.is_grabbed() {
+                    let canvas_cx = self.cursor_position.x / self.zoom + self.viewport_x;
+                    let canvas_cy = self.cursor_position.y / self.zoom + self.viewport_y;
+
+                    let hit = self.windows.iter().find(|cw| {
+                        (cw.canvas_x..(cw.canvas_x + cw.base_width as f64)).contains(&canvas_cx) &&
+                        (cw.canvas_y..(cw.canvas_y + cw.base_height as f64)).contains(&canvas_cy)
+                    });
+
+                    if let Some(cw) = hit {
+                        self.space.raise_element(&cw.window, true);
+                        let wl_surf = cw.window.toplevel().expect("Couldn't get ToplevelSurface as window is a popup").wl_surface().clone();
                         keyboard.set_focus(self, Some(wl_surf.clone()), serial);
 
                         self.focused_window_id = self
@@ -606,7 +669,6 @@ impl Treewm {
                     self.viewport_anim_start_x = self.viewport_x;
                     self.viewport_anim_start_y = self.viewport_y;
 
-                    eprintln!("[zoom] self.zoom={:.3}", self.zoom);
                     self.sync_window_positions();
                     return;
                 } else {

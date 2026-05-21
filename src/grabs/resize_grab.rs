@@ -84,7 +84,6 @@ impl PointerGrab<Treewm> for ResizeSurfaceGrab {
                     cw.base_width = new_width;
                     cw.tree_width = new_width;
                     cw.tree_height = new_height;
-                    
                     if should_update {
                         if let Some(tl) = cw.window.toplevel() {
                             tl.with_pending_state(|s| { s.size = Some((new_width, new_height).into()); });
@@ -94,7 +93,6 @@ impl PointerGrab<Treewm> for ResizeSurfaceGrab {
                 }
             }
         }
-        
         if should_update {
             self.last_update = now;
         }
