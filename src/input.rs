@@ -8,7 +8,7 @@ use smithay::{
     }, reexports::{wayland_protocols::xdg::shell::server::xdg_toplevel::ResizeEdge, wayland_server::protocol::wl_surface::WlSurface}, utils::{Logical, Point, SERIAL_COUNTER},
 };
 
-use crate::{AeroWM, grabs::{PanCanvasGrab, ResizeSurfaceGrab}, keybind::Trigger, keybind::Action, state::{CanvasWindow, ModifierKey, ViewMode}};
+use crate::{AeroWM, grabs::{PanCanvasGrab, ResizeSurfaceGrab}, keybind::{Trigger, Action, MouseButtons}, state::{CanvasWindow, ModifierKey, ViewMode}};
 impl AeroWM {
     fn window_edge_at(
         &self,
@@ -275,9 +275,21 @@ impl AeroWM {
                 let button = event.button_code();
                 let button_state = event.state();
 
+                if button_state == ButtonState::Pressed {
+                    for (keybind, action) in &self.config.keybinds {
+                        if let Trigger::Button(mouse_btn) = &keybind.trigger {
+                            if button == *mouse_btn as u32 && self.mods_match(&keybind.mods, &mods) {
+                                let action = action.clone();
+                                self.dispatch_action(&action);
+                                return;
+                            }
+                        }
+                    }
+                }
+
                 const BTN_MIDDLE: u32 = 0x112;
                 const BTN_LEFT: u32 = 0x110;
-                
+
                 if ButtonState::Pressed == button_state && !pointer.is_grabbed()
                     && button == BTN_LEFT && main_mod && !under.is_none()
                 {

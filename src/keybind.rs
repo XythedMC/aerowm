@@ -16,11 +16,12 @@ pub enum Trigger {
     Key(Keysym),
     Button(MouseButtons)
 }
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
+#[repr(u32)]
 pub enum MouseButtons {
-    BtnLeft = 0x110,
-    BtnMiddle = 0x112,
-    BtnRight = 0x111,
+    BtnLeft = 0x110u32,
+    BtnMiddle = 0x112u32,
+    BtnRight = 0x111u32,
 }
 
 #[derive(Debug, Clone)]
