@@ -40,7 +40,7 @@ fn main() -> anyhow::Result<()>{
         }
     };
 
-    let mut event_loop: EventLoop<AeroWM> = EventLoop::try_new().expect("Failed to create event loop");
+    let mut event_loop: EventLoop<'static, AeroWM> = EventLoop::try_new().expect("Failed to create event loop");
     let display: Display<AeroWM> = Display::new().unwrap();
 
     let mut state = AeroWM::new(&mut event_loop, display, config);

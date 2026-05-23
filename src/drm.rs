@@ -176,6 +176,7 @@ pub fn init_drm(event_loop: &mut EventLoop<'static, AeroWM>, state: &mut AeroWM)
                         if let Err(e) = compositor.queue_frame(()) {
                             eprintln!("activate queue_frame error: {:?}", e);
                         }
+
                     }
                 }
             }

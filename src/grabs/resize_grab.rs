@@ -8,18 +8,15 @@ use smithay::{
     },
     reexports::{wayland_server::protocol::wl_surface::WlSurface,
                 wayland_protocols::xdg::shell::server::xdg_toplevel::ResizeEdge},
-    utils::{Logical, Point},
+    utils::{Logical, Point, Rectangle},
 };
 use crate::AeroWM;
 
 pub struct ResizeSurfaceGrab {
     pub start_data: PointerGrabStartData<AeroWM>,
-    /// Cached surface so we can find the window in the canvas Vec efficiently.
-    pub window_surface: WlSurface,
-    /// The size of the window when the drag started.
+    pub window_id: u32,
     pub initial_width: i32,
     pub initial_height: i32,
-
     pub grabbed_edge: ResizeEdge,
     pub last_update: std::time::Instant,
 }
@@ -33,73 +30,54 @@ impl PointerGrab<AeroWM> for ResizeSurfaceGrab {
         event: &MotionEvent,
     ) {
         handle.motion(data, None, event);
-        
-        let delta = event.location - self.start_data.location;
+
+        let raw_delta = event.location - self.start_data.location;
+        let zoom = data.zoom;
+        let dx = (raw_delta.x / zoom) as i32;
+        let dy = (raw_delta.y / zoom) as i32;
 
         let mut new_width = self.initial_width;
         let mut new_height = self.initial_height;
 
         match self.grabbed_edge {
-            ResizeEdge::Bottom => {
-                new_height = (self.initial_height + delta.y as i32).max(128);
-            }
-            ResizeEdge::Top => {
-                new_height = (self.initial_height - delta.y as i32).max(128);
-            }
-            ResizeEdge::Right => {
-                new_width = (self.initial_width + delta.x as i32).max(128);
-            }
-            ResizeEdge::Left => {
-                new_width = (self.initial_width - delta.x as i32).max(128);
-            }
-            ResizeEdge::BottomRight => {
-                new_width = (self.initial_width + delta.x as i32).max(128);
-                new_height = (self.initial_height + delta.y as i32).max(128);
-            }
-            ResizeEdge::BottomLeft => {
-                new_width = (self.initial_width - delta.x as i32).max(128);
-                new_height = (self.initial_height + delta.y as i32).max(128);
-            }
-            ResizeEdge::TopRight => {
-                new_width = (self.initial_width + delta.x as i32).max(128);
-                new_height = (self.initial_height - delta.y as i32).max(128);
-            }
-            ResizeEdge::TopLeft => {
-                new_width = (self.initial_width - delta.x as i32).max(128);
-                new_height = (self.initial_height - delta.y as i32).max(128);
-            }
-            _ => {},
+            ResizeEdge::Bottom      => { new_height = (self.initial_height + dy).max(128); }
+            ResizeEdge::Top         => { new_height = (self.initial_height - dy).max(128); }
+            ResizeEdge::Right       => { new_width  = (self.initial_width  + dx).max(128); }
+            ResizeEdge::Left        => { new_width  = (self.initial_width  - dx).max(128); }
+            ResizeEdge::BottomRight => { new_width  = (self.initial_width  + dx).max(128); new_height = (self.initial_height + dy).max(128); }
+            ResizeEdge::BottomLeft  => { new_width  = (self.initial_width  - dx).max(128); new_height = (self.initial_height + dy).max(128); }
+            ResizeEdge::TopRight    => { new_width  = (self.initial_width  + dx).max(128); new_height = (self.initial_height - dy).max(128); }
+            ResizeEdge::TopLeft     => { new_width  = (self.initial_width  - dx).max(128); new_height = (self.initial_height - dy).max(128); }
+            _ => {}
         };
 
         let now = std::time::Instant::now();
         let should_update = now.duration_since(self.last_update).as_millis() >= 16;
 
-        for cw in data.windows.iter_mut() {
-            if cw.window
-                .toplevel()
-                .map_or(false, |t| t.wl_surface() == &self.window_surface)
-            {
-                if cw.tree_width != new_width || cw.tree_height != new_height {
-                    cw.base_height = new_height;
-                    cw.base_width = new_width;
-                    cw.tree_width = new_width;
-                    cw.tree_height = new_height;
-                    if should_update {
-                        if let Some(tl) = cw.window.toplevel() {
-                            tl.with_pending_state(|s| { s.size = Some((new_width, new_height).into()); });
-                            tl.send_pending_configure();
-                        }
+        if let Some(cw) = data.windows.iter_mut().find(|cw| cw.id == self.window_id) {
+            if cw.base_width != new_width || cw.base_height != new_height {
+                cw.base_width  = new_width;
+                cw.base_height = new_height;
+                cw.tree_width  = new_width;
+                cw.tree_height = new_height;
+                if should_update {
+                    if let Some(tl) = cw.window.toplevel() {
+                        tl.with_pending_state(|s| { s.size = Some((new_width, new_height).into()); });
+                        tl.send_pending_configure();
+                    } else if let Some(x11) = cw.window.x11_surface() {
+                        let _ = x11.configure(Some(Rectangle::from_loc_and_size((0, 0), (new_width, new_height))));
                     }
                 }
             }
         }
+
         if should_update {
             self.last_update = now;
         }
 
         let _ = data.display_handle.flush_clients();
-
     }
+
     fn relative_motion(
         &mut self,
         data: &mut AeroWM,
@@ -137,89 +115,21 @@ impl PointerGrab<AeroWM> for ResizeSurfaceGrab {
         handle.frame(data);
     }
 
-    fn gesture_swipe_begin(
-        &mut self,
-        data: &mut AeroWM,
-        handle: &mut PointerInnerHandle<'_, AeroWM>,
-        event: &GestureSwipeBeginEvent,
-    ) {
-        handle.gesture_swipe_begin(data, event);
-    }
-
-    fn gesture_swipe_update(
-        &mut self,
-        data: &mut AeroWM,
-        handle: &mut PointerInnerHandle<'_, AeroWM>,
-        event: &GestureSwipeUpdateEvent,
-    ) {
-        handle.gesture_swipe_update(data, event);
-    }
-
-    fn gesture_swipe_end(
-        &mut self,
-        data: &mut AeroWM,
-        handle: &mut PointerInnerHandle<'_, AeroWM>,
-        event: &GestureSwipeEndEvent,
-    ) {
-        handle.gesture_swipe_end(data, event);
-    }
-
-    fn gesture_pinch_begin(
-        &mut self,
-        data: &mut AeroWM,
-        handle: &mut PointerInnerHandle<'_, AeroWM>,
-        event: &GesturePinchBeginEvent,
-    ) {
-        handle.gesture_pinch_begin(data, event);
-    }
-
-    fn gesture_pinch_update(
-        &mut self,
-        data: &mut AeroWM,
-        handle: &mut PointerInnerHandle<'_, AeroWM>,
-        event: &GesturePinchUpdateEvent,
-    ) {
-        handle.gesture_pinch_update(data, event);
-    }
-
-    fn gesture_pinch_end(
-        &mut self,
-        data: &mut AeroWM,
-        handle: &mut PointerInnerHandle<'_, AeroWM>,
-        event: &GesturePinchEndEvent,
-    ) {
-        handle.gesture_pinch_end(data, event);
-    }
-
-    fn gesture_hold_begin(
-        &mut self,
-        data: &mut AeroWM,
-        handle: &mut PointerInnerHandle<'_, AeroWM>,
-        event: &GestureHoldBeginEvent,
-    ) {
-        handle.gesture_hold_begin(data, event);
-    }
-
-    fn gesture_hold_end(
-        &mut self,
-        data: &mut AeroWM,
-        handle: &mut PointerInnerHandle<'_, AeroWM>,
-        event: &GestureHoldEndEvent,
-    ) {
-        handle.gesture_hold_end(data, event);
-    }
+    fn gesture_swipe_begin(&mut self, data: &mut AeroWM, handle: &mut PointerInnerHandle<'_, AeroWM>, event: &GestureSwipeBeginEvent) { handle.gesture_swipe_begin(data, event); }
+    fn gesture_swipe_update(&mut self, data: &mut AeroWM, handle: &mut PointerInnerHandle<'_, AeroWM>, event: &GestureSwipeUpdateEvent) { handle.gesture_swipe_update(data, event); }
+    fn gesture_swipe_end(&mut self, data: &mut AeroWM, handle: &mut PointerInnerHandle<'_, AeroWM>, event: &GestureSwipeEndEvent) { handle.gesture_swipe_end(data, event); }
+    fn gesture_pinch_begin(&mut self, data: &mut AeroWM, handle: &mut PointerInnerHandle<'_, AeroWM>, event: &GesturePinchBeginEvent) { handle.gesture_pinch_begin(data, event); }
+    fn gesture_pinch_update(&mut self, data: &mut AeroWM, handle: &mut PointerInnerHandle<'_, AeroWM>, event: &GesturePinchUpdateEvent) { handle.gesture_pinch_update(data, event); }
+    fn gesture_pinch_end(&mut self, data: &mut AeroWM, handle: &mut PointerInnerHandle<'_, AeroWM>, event: &GesturePinchEndEvent) { handle.gesture_pinch_end(data, event); }
+    fn gesture_hold_begin(&mut self, data: &mut AeroWM, handle: &mut PointerInnerHandle<'_, AeroWM>, event: &GestureHoldBeginEvent) { handle.gesture_hold_begin(data, event); }
+    fn gesture_hold_end(&mut self, data: &mut AeroWM, handle: &mut PointerInnerHandle<'_, AeroWM>, event: &GestureHoldEndEvent) { handle.gesture_hold_end(data, event); }
 
     fn unset(&mut self, data: &mut AeroWM) {
-        for cw in data.windows.iter_mut() {
-            if cw.window
-                .toplevel()
-                .map_or(false, |t| t.wl_surface() == &self.window_surface)
-            {
-                cw.resize_edge = smithay::reexports::wayland_protocols::xdg::shell::server::xdg_toplevel::ResizeEdge::None;
-            }
+        if let Some(cw) = data.windows.iter_mut().find(|cw| cw.id == self.window_id) {
+            cw.resize_edge = ResizeEdge::None;
         }
     }
-    
+
     fn start_data(&self) -> &PointerGrabStartData<AeroWM> {
         &self.start_data
     }

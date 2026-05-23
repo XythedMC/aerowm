@@ -31,4 +31,5 @@ features = [
     "backend_udev",
     "backend_session",
     "backend_session_libseat",
+    "xwayland",
 ]

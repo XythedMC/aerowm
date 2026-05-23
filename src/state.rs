@@ -1,4 +1,4 @@
-use std::{collections::HashMap, ffi::OsString, process::Command, sync::Arc, time::{Duration, Instant}};
+use std::{collections::HashMap, env::{self, set_var}, ffi::OsString, iter::empty, process::{Command, Stdio}, sync::Arc, time::{Duration, Instant}};
 
 use smithay::{
     backend::{
@@ -15,15 +15,14 @@ use smithay::{
     desktop::{LayerSurface, PopupManager, Space, Window, WindowSurfaceType, layer_map_for_output}, 
     input::{Seat, SeatState, pointer::CursorImageStatus}, 
     reexports::{
-        calloop::{EventLoop, Interest, LoopSignal, Mode, PostAction, RegistrationToken, generic::Generic}, 
-        drm::control::crtc::Handle, wayland_server::{
+        calloop::{EventLoop, Interest, LoopSignal, Mode, PostAction, RegistrationToken, generic::Generic}, drm::control::crtc::Handle, wayland_protocols::xwayland, wayland_server::{
             Display, 
             DisplayHandle, 
             backend::{ClientData, ClientId, DisconnectReason}, 
             protocol::wl_surface::WlSurface
         }
     }, 
-    utils::{DeviceFd, Logical, Point, SERIAL_COUNTER, Size}, 
+    utils::{DeviceFd, Logical, Point, Rectangle, SERIAL_COUNTER, Size}, 
     wayland::{
         compositor::{CompositorClientState, CompositorState}, 
         cursor_shape::CursorShapeManagerState, 
@@ -38,8 +37,8 @@ use smithay::{
         shm::ShmState, 
         socket::ListeningSocketSource, 
         viewporter::ViewporterState, 
-        xdg_activation::XdgActivationState,
-    }
+        xdg_activation::XdgActivationState, xwayland_shell::XWaylandShellState,
+    }, xwayland::{X11Wm, XWayland, XWaylandEvent}
 };
 
 use xcursor::{CursorTheme, parser::parse_xcursor};
@@ -133,6 +132,8 @@ pub struct CanvasWindow {
     pub pre_fullscreen_y: f64,
     pub pre_fullscreen_width: i32,
     pub pre_fullscreen_height: i32,
+
+    pub z_index: u32,
 }
 
 pub struct AeroWM {
@@ -185,6 +186,7 @@ pub struct AeroWM {
     pub dragged_window: Option<(u32, Point<f64, Logical>)>,
 
     pub layer_surfaces: Vec<LayerSurface>,
+    pub x11_override_redirect: Vec<Window>,
     pub background_type: BackgroundType,
     
     pub tiling_visible_ids: Vec<u32>,
@@ -208,13 +210,20 @@ pub struct AeroWM {
     pub seat: Seat<Self>,
     pub event_tx: Option<tokio::sync::broadcast::Sender<crate::ipc::IpcEvent>>,
 
+    // Xwayland
+    pub xwayland: Option<RegistrationToken>,
+    pub xwm: Option<X11Wm>,
+    pub xwayland_shell_state: XWaylandShellState,
+    pub x11_display_number: Option<u32>,
+    pub z_counter: u32,
+
     pub main_modifier: ModifierKey,
     /// DMABuf buffers waiting to be imported by the renderer on the next frame.
     pub pending_dmabufs: Vec<(Dmabuf, ImportNotifier)>,
 }
 
 impl AeroWM {
-    pub fn new(event_loop: &mut EventLoop<Self>, display: Display<Self>, config: AeroWMConfig) -> Self {
+    pub fn new(event_loop: &mut EventLoop<'static, Self>, display: Display<Self>, config: AeroWMConfig) -> Self {
         let start_time = std::time::Instant::now();
         let dh = display.handle();
 
@@ -260,6 +269,10 @@ impl AeroWM {
             _ => panic!("Selected background type is not allowed! Only options are 'color', 'image' and 'shader'")
         };
 
+        eprintln!("calling Xwayland");
+        let xwayland_shell_state = XWaylandShellState::new::<AeroWM>(&dh);
+        let xwayland = Self::init_xwayland(&dh, event_loop, config.clone());
+
         Self {
             start_time,
             display_handle: dh,
@@ -282,6 +295,7 @@ impl AeroWM {
             scale: 1.0,
             anim_start: None,
             next_window_id: 0,
+            z_counter: 0,
             focused_window_id: None,
             tiling_root_id: None,
             view_mode: ViewMode::Tiling,
@@ -296,6 +310,7 @@ impl AeroWM {
             active_drag: false,
             dragged_window: None,
             layer_surfaces,
+            x11_override_redirect: Vec::new(),
             background_type,
             tiling_visible_ids: visible_ids,
             socket_name,
@@ -318,6 +333,10 @@ impl AeroWM {
             event_tx: None,
             main_modifier,
             pending_dmabufs: Vec::new(),
+            xwayland: Some(xwayland),
+            xwm: None,
+            xwayland_shell_state,
+            x11_display_number: None,
         }
     }
 
@@ -355,6 +374,49 @@ impl AeroWM {
         "wayland-AeroWM".into()
     }
 
+    fn init_xwayland(dh: &DisplayHandle, event_loop: &mut EventLoop<'static, Self>, _config: AeroWMConfig) -> RegistrationToken {
+        eprintln!("Xwayland called");
+        let (xwayland, client) = XWayland::spawn(
+            dh, 
+            None, 
+            empty::<(String, String)>(), 
+            true, 
+            Stdio::null(), Stdio::null(), 
+            |_| {},
+        ).expect("Failed to spawn Xwayland");
+
+        let loop_handle = event_loop.handle();
+        let dh = dh.clone();
+        event_loop.handle().insert_source(xwayland, move |event, _, state| {
+            match event {
+                XWaylandEvent::Ready { x11_socket, display_number } => {
+                    eprintln!("Xwayland ready on :{}", display_number);
+                    let loop_handle = loop_handle.clone();
+                    let display = format!(":{}", display_number);
+                    let client = client.clone();
+                    let cookie = Command::new("mcookie")
+                        .output()
+                        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+                        .unwrap_or("deadbeef".to_string());
+                    Command::new("xauth")
+                        .args(["add", &display, "MIT-MAGIC-COOKIE-1", &cookie])
+                        .status()
+                        .ok();
+                    let xwm = X11Wm::start_wm(
+                        loop_handle, 
+                        &dh, 
+                        x11_socket, 
+                        client
+                    ).expect("Failed to start X11Wm");
+                    state.x11_display_number = Some(display_number);
+                    state.xwm = Some(xwm);
+                    set_var("DISPLAY", format!(":{}", display_number));
+                },
+                XWaylandEvent::Error => eprintln!("Xwayland exited"),
+            }
+        }).expect("Failed to insert Xwayland source")
+    }
+
     // - IDs --------------------------------
 
     pub fn alloc_id(&mut self) -> u32 {
@@ -376,13 +438,18 @@ impl AeroWM {
             .windows
             .iter()
             .find(|cw| cw.id == id)
-            .and_then(|cw| cw.window.toplevel().map(|t| t.wl_surface().clone()));
+            .and_then(|cw| 
+                cw.window.toplevel().map(|t| t.wl_surface().clone())
+                    .or_else(|| cw.window.x11_surface().and_then(|s| s.wl_surface().clone()))
+            );
         let keyboard = self.seat.get_keyboard().expect("Keyboard not found - this is a bug");
         keyboard.set_focus(self, surface, serial);
         self.space.elements().for_each(|w| { w.set_activated(false); });
         if let Some(cw) = self.windows.iter().find(|cw| cw.id == id) {
             cw.window.set_activated(true);
-            cw.window.toplevel().unwrap().send_pending_configure();
+            if let Some(toplevel) = cw.window.toplevel() {
+                toplevel.send_pending_configure();
+            }
         }
     }
 
@@ -468,6 +535,12 @@ impl AeroWM {
                 if let Some(tl) = window.window.toplevel() {
                     tl.with_pending_state(|s| s.size = Some((sw as i32, sh as i32).into()));
                     tl.send_pending_configure();
+                } else if let Some(x11) = window.window.x11_surface() {
+                    let _ = x11.configure(Rectangle {
+                        loc: (0,0).into(),
+                        size: (sw as i32, sh as i32).into()
+                    });
+                    let _ = x11.set_fullscreen(true);
                 }
                 window.is_fullscreen = true;
             } else {
@@ -478,6 +551,12 @@ impl AeroWM {
                 if let Some(tl) = window.window.toplevel() {
                     tl.with_pending_state(|s| s.size = Some((window.pre_fullscreen_width, window.pre_fullscreen_height).into()));
                     tl.send_pending_configure();
+                } else if let Some(x11) = window.window.x11_surface() {
+                    let _ = x11.configure(Rectangle {
+                        loc: (0,0).into(),
+                        size: (window.pre_fullscreen_width, window.pre_fullscreen_height).into(),
+                    });
+                    let _ = x11.set_fullscreen(false);
                 }
                 window.is_fullscreen = false;
             }
@@ -730,8 +809,8 @@ impl AeroWM {
 
                 let elements = build_render_elements(
                     &self.windows,
+                    &self.x11_override_redirect,
                     &self.space,
-                    self.focused_window_id,
                     self.view_mode,
                     &self.tiling_visible_ids,
                     self.scale,
@@ -806,14 +885,14 @@ impl AeroWM {
                 cmd.envs(env);
             }
         }
-        match Command::new(name)
-            .env("WAYLAND_DISPLAY", &socket_str)
-            .env_remove("DISPLAY")
+        match cmd.env("WAYLAND_DISPLAY", &socket_str)
+            .env("DISPLAY", format!(":{}", self.x11_display_number.unwrap_or(0)))
             .spawn()
         {
             Ok(_) => println!("Spawned {} at ({}, {})", name,  x, y),
             Err(e) => tracing::error!("Failed to spawn kitty: {}", e),
         }
+        eprintln!("launch_app: DISPLAY=:{}", self.x11_display_number.unwrap_or(0));
     }
     // -- Canvas / viewport ------------------------------
 

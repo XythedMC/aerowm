@@ -8,7 +8,7 @@ use smithay::{
     }, reexports::{wayland_protocols::xdg::shell::server::xdg_toplevel::ResizeEdge, wayland_server::protocol::wl_surface::WlSurface}, utils::{Logical, Point, SERIAL_COUNTER},
 };
 
-use crate::{AeroWM, grabs::{PanCanvasGrab, ResizeSurfaceGrab}, keybind::{Trigger, Action, MouseButtons}, state::{CanvasWindow, ModifierKey, ViewMode}};
+use crate::{AeroWM, grabs::{PanCanvasGrab, ResizeSurfaceGrab}, keybind::{Trigger, Action}, state::{CanvasWindow, ModifierKey, ViewMode}};
 impl AeroWM {
     fn window_edge_at(
         &self,
@@ -122,11 +122,16 @@ impl AeroWM {
                 self.cursor_position.y = self.cursor_position.y.clamp(output_geo.loc.y as f64, (output_geo.loc.y + output_geo.size.h) as f64);
                 
                 if self.active_drag {
+                    let zoom = self.zoom;
                     let (id, _) = self.dragged_window.unwrap();
                     self.windows.iter_mut().find(|cw| cw.id == id)
                         .map(|cw| {
-                            cw.canvas_x += event.delta_x();
-                            cw.canvas_y += event.delta_y();
+                            cw.canvas_x += event.delta_x() / zoom;
+                            cw.canvas_y += event.delta_y() / zoom;
+                            cw.target_x = cw.canvas_x;
+                            cw.target_y = cw.canvas_y;
+                            cw.anim_start_x = cw.canvas_x;
+                            cw.anim_start_y = cw.canvas_y;
                     });
                     self.sync_window_positions();
                     pointer.motion(self, None, &MotionEvent {
@@ -293,14 +298,17 @@ impl AeroWM {
                 if ButtonState::Pressed == button_state && !pointer.is_grabbed()
                     && button == BTN_LEFT && main_mod && !under.is_none()
                 {
-                    let (wl_surf, _) = under.unwrap();
+                    let canvas_cx = self.cursor_position.x / self.zoom + self.viewport_x;
+                    let canvas_cy = self.cursor_position.y / self.zoom + self.viewport_y;
                     if let Some(window) = self.windows.iter().find(|cw| {
-                        cw.window   
-                            .toplevel()
-                            .map_or(false, |t| t.wl_surface() == &wl_surf)
+                        (cw.canvas_x..(cw.canvas_x + cw.base_width as f64)).contains(&canvas_cx) &&
+                        (cw.canvas_y..(cw.canvas_y + cw.base_height as f64)).contains(&canvas_cy)
                     }) {
                         self.active_drag = true;
-                        let offset: Point<f64, Logical> = Point::new(pointer.current_location().x - window.canvas_x, pointer.current_location().y - window.canvas_y);
+                        let offset: Point<f64, Logical> = Point::new(
+                            pointer.current_location().x - window.canvas_x,
+                            pointer.current_location().y - window.canvas_y,
+                        );
                         self.dragged_window = Some((window.id, offset));
                     }
                 }
@@ -323,7 +331,7 @@ impl AeroWM {
                     };
                     pointer.set_grab(self, grab, serial, Focus::Clear);
                 } else if ButtonState::Pressed == button_state && !pointer.is_grabbed()
-                    && button == BTN_LEFT
+                    && button == BTN_LEFT && !main_mod
                 {
                     let px = pointer.current_location().x as i32;
                     let py = pointer.current_location().y as i32;
@@ -342,8 +350,6 @@ impl AeroWM {
                     if let Some((cw_id, edge)) = found {
                         if edge != ResizeEdge::None {
                             let cw = self.windows.iter_mut().find(|w| w.id == cw_id).unwrap();
-                            let surface = cw.window.toplevel().expect("Window doesnt have a top level").wl_surface().clone();
-
                             cw.resize_edge = edge;
                             cw.resize_initial_x = cw.canvas_x;
                             cw.resize_initial_y = cw.canvas_y;
@@ -359,7 +365,7 @@ impl AeroWM {
                                     button: BTN_LEFT,
                                     location: pointer.current_location(),
                                 },
-                                window_surface: surface,
+                                window_id: cw_id,
                                 initial_width,
                                 initial_height,
                                 grabbed_edge: edge,
@@ -368,9 +374,15 @@ impl AeroWM {
                             pointer.set_grab(self, grab, serial, Focus::Clear);
                         } else {
                             // cursor is over window body — focus it
-                            let cw = self.windows.iter().find(|w| w.id == cw_id).unwrap();
-                            let wl_surf = cw.window.toplevel().unwrap().wl_surface().clone();
-                            self.space.raise_element(&cw.window, true);
+                            let z = self.z_counter;
+                            self.z_counter += 1;
+                            let cw = self.windows.iter_mut().find(|w| w.id == cw_id).unwrap();
+                            cw.z_index = z;
+                            let wl_surf = cw.window.toplevel().map(|t| t.wl_surface().clone())
+                                .or_else(|| cw.window.x11_surface().and_then(|s| s.wl_surface()))
+                                .unwrap();
+                            let win_ref = cw.window.clone();
+                            self.space.raise_element(&win_ref, true);
                             keyboard.set_focus(self, Some(wl_surf.clone()), serial);
                             self.focused_window_id = Some(cw_id);
                         }
@@ -378,12 +390,12 @@ impl AeroWM {
                         // cursor over empty canvas — deselect
                         self.space.elements().for_each(|w| {
                             w.set_activated(false);
-                            w.toplevel().unwrap().send_pending_configure();
+                            if let Some(t) = w.toplevel() { t.send_pending_configure(); }
                         });
                         keyboard.set_focus(self, Option::<WlSurface>::None, serial);
                         self.focused_window_id = None;
                     }            
-                } else if ButtonState::Pressed == button_state && !pointer.is_grabbed() {
+                } else if ButtonState::Pressed == button_state && !pointer.is_grabbed() && !self.active_drag {
                     let canvas_cx = self.cursor_position.x / self.zoom + self.viewport_x;
                     let canvas_cy = self.cursor_position.y / self.zoom + self.viewport_y;
 
@@ -393,27 +405,32 @@ impl AeroWM {
                     });
 
                     if let Some(cw) = hit {
-                        self.space.raise_element(&cw.window, true);
-                        let wl_surf = cw.window.toplevel().expect("Couldn't get ToplevelSurface as window is a popup").wl_surface().clone();
+                        let hit_id = cw.id;
+                        let z = self.z_counter;
+                        self.z_counter += 1;
+                        let cw = self.windows.iter_mut().find(|w| w.id == hit_id).unwrap();
+                        cw.z_index = z;
+                        let win_ref = cw.window.clone();
+                        let wl_surf = cw.window.toplevel().map(|t| t.wl_surface().clone())
+                            .or_else(|| cw.window.x11_surface().and_then(|s| s.wl_surface()))
+                            .unwrap();
+                        self.space.raise_element(&win_ref, true);
                         keyboard.set_focus(self, Some(wl_surf.clone()), serial);
 
                         self.focused_window_id = self
                             .windows
                             .iter()
                             .find(|cw| {
-                                cw.window
-                                    .toplevel()
-                                    .map_or(false, |t| t.wl_surface() == &wl_surf)
+                                cw.window.toplevel().map_or(false, |t| t.wl_surface() == &wl_surf)
+                                || cw.window.x11_surface().and_then(|s| s.wl_surface()).map_or(false, |s| s == wl_surf)
                             })
                             .map(|cw| cw.id);
 
-                        // In tree view, windows are free-form: don't reposition them on focus.
-                        // In tiling, recalculate layout around the newly focused window.
                         match self.view_mode {
                             ViewMode::Tiling => {
                                 self.apply_layout();
                                 self.space.elements().for_each(|window| {
-                                    window.toplevel().expect("Couldn't get ToplevelSurface as window is a popup").send_pending_configure();
+                                    if let Some(t) = window.toplevel() { t.send_pending_configure(); }
                                 });
                             }
                             ViewMode::TreeView => {}
@@ -421,7 +438,7 @@ impl AeroWM {
                     } else {
                         self.space.elements().for_each(|window| {
                             window.set_activated(false);
-                            window.toplevel().expect("Couldn't get ToplevelSurface as window is a popup").send_pending_configure();
+                            if let Some(t) = window.toplevel() { t.send_pending_configure(); }
                         });
                         keyboard.set_focus(self, Option::<WlSurface>::None, serial);
                         self.focused_window_id = None;

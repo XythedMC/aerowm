@@ -17,6 +17,7 @@ AeroWM organises windows in a tree structure. You can work in a focused **tiling
 - **Borders with corner rounding** - customisable focused/unfocused border colours and rounded corners
 - **Hover to focus** - optional focus-follows-mouse
 - **Background** - solid colour, image, or custom GLSL shader
+- **XWayland support** - run X11 applications alongside native Wayland clients
 
 ## Requirements
 
@@ -127,7 +128,7 @@ Modifiers: `Ctrl`, `Alt`, `Shift`, `Super`. Mouse buttons: `left`, `right`, `mid
 
 ## Planned / In Progress
 
-- **XWayland support** - compatibility with X11 applications
+- ~~**XWayland support** - compatibility with X11 applications~~
 - **Multi-output support** - multiple monitors
 - **wlr protocols** - layer shell (bars, docks, notifications), screencopy, data control, idle notify, session lock
 - **Background images and shaders** - image backgrounds and custom GLSL shaders

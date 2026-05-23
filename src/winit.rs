@@ -115,8 +115,8 @@ pub fn init_winit(
                         
                         let overlays = rendering::build_render_elements(
                             &state.windows,
+                            &state.x11_override_redirect,
                             &state.space,
-                            state.focused_window_id,
                             state.view_mode,
                             &state.tiling_visible_ids,
                             state.scale,

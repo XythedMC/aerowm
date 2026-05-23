@@ -9,11 +9,10 @@ use smithay::{
     wayland::{
         buffer::BufferHandler,
         compositor::{
-            get_parent, is_sync_subsurface, CompositorClientState, CompositorHandler,
-            CompositorState,
+            CompositorClientState, CompositorHandler, CompositorState, get_parent, is_sync_subsurface
         },
         shm::{ShmHandler, ShmState},
-    },
+    }, xwayland::XWaylandClientData,
 };
 
 use super::xdg_shell;
@@ -24,7 +23,10 @@ impl CompositorHandler for AeroWM {
     }
 
     fn client_compositor_state<'a>(&self, client: &'a Client) -> &'a CompositorClientState {
-        &client.get_data::<ClientState>().unwrap().compositor_state
+        if let Some(state) = client.get_data::<ClientState>() {
+            return &state.compositor_state;
+        }
+        &client.get_data::<XWaylandClientData>().unwrap().compositor_state
     }
 
     fn commit(&mut self, surface: &WlSurface) {
@@ -45,7 +47,10 @@ impl CompositorHandler for AeroWM {
             if let Some(cw) = self
                 .windows
                 .iter_mut()
-                .find(|w| w.window.toplevel().map(|t| t.wl_surface() == surface).unwrap_or(false)) 
+                .find(|w| {
+                    w.window.toplevel().map(|t| t.wl_surface() == surface).unwrap_or(false)
+                        || w.window.x11_surface().and_then(|s| s.wl_surface()).map_or(false, |s| &s == surface)
+                }) 
             {
                 use smithay::reexports::wayland_protocols::xdg::shell::server::xdg_toplevel::ResizeEdge;
                 if cw.resize_edge != ResizeEdge::None {

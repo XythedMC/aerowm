@@ -257,8 +257,8 @@ pub fn draw_cursor(
 
 pub fn build_render_elements(
     windows: &[CanvasWindow],
+    or_windows: &[Window],
     space: &Space<Window>,
-    focused_window_id: Option<u32>,
     view_mode: ViewMode,
     tiling_visible_ids: &[u32],
     scale: f64,
@@ -275,27 +275,26 @@ pub fn build_render_elements(
 ) ->Vec<AeroWMElement> {
     // Assemble overlay elements for this frame.
     let mut overlays: Vec<AeroWMElement> = Vec::new();
-    let (focused, unfocused): (Vec<&CanvasWindow>, Vec<&CanvasWindow>) = windows.iter().partition(|cw| Some(cw.id) == focused_window_id );
     let output = space.outputs().next().unwrap().clone();
 
     if !cursor_texture.is_none() {
         overlays.push(AeroWMElement::Texture(draw_cursor(cursor_position, cursor_texture.clone().expect("cursor image undefined"), renderer, scale, config)));
     }
 
-    for focused_window in focused {
-        if view_mode == ViewMode::Tiling && !tiling_visible_ids.contains(&focused_window.id) {continue;}
-        eprintln!("[canvas] id={} canvas=({:.0},{:.0}) base={}x{}",
-            focused_window.id, focused_window.canvas_x, focused_window.canvas_y,
-            focused_window.base_width, focused_window.base_height);
-        if let Some(geo) = space.element_geometry(&focused_window.window) {
-            let geom_offset = focused_window.window.geometry().loc;
+    let mut sorted_windows: Vec<&CanvasWindow> = windows.iter().collect();
+    sorted_windows.sort_by_key(|cw| std::cmp::Reverse(cw.z_index));
+
+    for window in sorted_windows {
+        if view_mode == ViewMode::Tiling && !tiling_visible_ids.contains(&window.id) {continue;}
+        if let Some(geo) = space.element_geometry(&window.window) {
+            let geom_offset = window.window.geometry().loc;
             let surface_phys = (geo.loc - geom_offset).to_physical_precise_round(scale);
             let phys_loc = geo.loc.to_physical_precise_round(scale);
             if let Some(prog) = &border_prog {
-                overlays.push(AeroWMElement::Shader(focus_border_elements(Some(focused_window.id), config.clone(), zoom, prog, focused_window, geo)));
+                overlays.push(AeroWMElement::Shader(focus_border_elements(Some(window.id), config.clone(), zoom, prog, window, geo)));
             }
             overlays.extend(
-                focused_window.window.render_elements::<WaylandSurfaceRenderElement<GlesRenderer>>(
+                window.window.render_elements::<WaylandSurfaceRenderElement<GlesRenderer>>(
                     renderer,
                     surface_phys,
                     Scale::from(scale),
@@ -307,24 +306,17 @@ pub fn build_render_elements(
         }
     }
 
-    for unfocused_window in unfocused {
-        if view_mode == ViewMode::Tiling && !tiling_visible_ids.contains(&unfocused_window.id) {continue;}
-        if let Some(geo) = space.element_geometry(&unfocused_window.window) {
-            let geom_offset = unfocused_window.window.geometry().loc;
+    for w in or_windows {
+        if let Some(geo) = space.element_geometry(w) {
+            let geom_offset = w.geometry().loc;
             let surface_phys = (geo.loc - geom_offset).to_physical_precise_round(scale);
-            let phys_loc = geo.loc.to_physical_precise_round(scale);
-            if let Some(prog) = &border_prog {
-                overlays.push(AeroWMElement::Shader(focus_border_elements(Some(unfocused_window.id), config.clone(), zoom, prog, unfocused_window, geo)));
-            }
             overlays.extend(
-                unfocused_window.window.render_elements::<WaylandSurfaceRenderElement<GlesRenderer>>(
-                    renderer,
-                    surface_phys,
-                    Scale::from(scale),
+                w.render_elements(
+                    renderer, 
+                    surface_phys, 
+                    Scale::from(scale), 
                     1.0,
-                ).into_iter().map(|e| AeroWMElement::ScaledSurface(
-                    RescaleRenderElement::from_element(e, phys_loc, Scale::from(zoom))
-                ))
+                ).into_iter().map(AeroWMElement::Surface)
             );
         }
     }

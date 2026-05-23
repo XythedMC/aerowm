@@ -59,9 +59,9 @@ pub fn parse_keybind(s: &str) -> Result<ParsedKeybind, Error> {
                 }
 
                 trigger = Some(match name {
-                    "leftclick" | "left" => Trigger::Button(MouseButtons::BtnLeft),
-                    "middleclick" | "middle" => Trigger::Button(MouseButtons::BtnMiddle),
-                    "rightclick" | "right" => Trigger::Button(MouseButtons::BtnRight),
+                    "leftclick" | "lmb" => Trigger::Button(MouseButtons::BtnLeft),
+                    "middleclick" | "mmb" => Trigger::Button(MouseButtons::BtnMiddle),
+                    "rightclick" | "rmb" => Trigger::Button(MouseButtons::BtnRight),
                     key => Trigger::Key(keysym_from_name(key, KEYSYM_CASE_INSENSITIVE))
                 });
             }

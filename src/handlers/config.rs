@@ -39,8 +39,8 @@ pub struct LaunchRule {
 pub fn read_config() -> Result<AeroWMConfig, Error> {
     let config_path = config_dir()
         .ok_or_else(|| Error::runtime("Config directory ($HOME/.config) doesn't exist"))?
-        .join("AeroWM")
-        .join("AeroWM.lua");
+        .join("aerowm")
+        .join("aerowm.lua");
     eprintln!("config path: {:?}", config_path);
     let contents = read_to_string(config_path)?;
 

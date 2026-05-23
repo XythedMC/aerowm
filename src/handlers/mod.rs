@@ -4,6 +4,7 @@ pub mod config;
 pub mod cursor_shape;
 pub mod tablet;
 pub mod layer_shell;
+mod xwayland;
 use crate::AeroWM;
 
 use smithay::input::dnd::{DnDGrab, DndGrabHandler, GrabType, Source};
@@ -25,7 +26,7 @@ use smithay::wayland::fractional_scale::FractionalScaleHandler;
 use smithay::wayland::dmabuf::{DmabufHandler, DmabufState, ImportNotifier};
 use smithay::reexports::wayland_protocols::xdg::decoration::zv1::server::zxdg_toplevel_decoration_v1;
 use smithay::backend::allocator::dmabuf::Dmabuf;
-use smithay::{delegate_data_device, delegate_output, delegate_seat, delegate_primary_selection};
+use smithay::{delegate_data_device, delegate_output, delegate_seat, delegate_primary_selection, delegate_xwayland_shell};
 use smithay::{delegate_xdg_decoration, delegate_xdg_activation, delegate_viewporter, delegate_fractional_scale, delegate_dmabuf};
 
 impl SeatHandler for AeroWM {
@@ -53,6 +54,7 @@ impl SeatHandler for AeroWM {
     }
 }
 
+delegate_xwayland_shell!(AeroWM);
 delegate_seat!(AeroWM);
 
 impl SelectionHandler for AeroWM {

@@ -56,6 +56,8 @@ impl XdgShellHandler for AeroWM {
             }
         }
 
+        let z_index = self.z_counter;
+        self.z_counter += 1;
         self.windows.push(CanvasWindow {
             id,
             window,
@@ -83,6 +85,7 @@ impl XdgShellHandler for AeroWM {
             pre_fullscreen_y: 0.0,
             pre_fullscreen_width: 0,
             pre_fullscreen_height: 0,
+            z_index,
         });
 
         self.emit_event(crate::ipc::IpcEvent::WindowOpened {
@@ -137,6 +140,8 @@ impl XdgShellHandler for AeroWM {
         }
         // If dead window was a root, its orphans already have parent_id = None → they are roots.
 
+        let dead_window = self.windows[pos].window.clone();
+        self.space.unmap_elem(&dead_window);
         self.windows.remove(pos);
         self.emit_event(crate::ipc::IpcEvent::WindowClosed { id: dead_id.to_string() });
 
@@ -240,7 +245,7 @@ impl XdgShellHandler for AeroWM {
 
             let grab = ResizeSurfaceGrab {
                 start_data,
-                window_surface: wl_surface.clone(),
+                window_id: cw_id,
                 initial_width: cw.tree_width,
                 initial_height: cw.tree_height,
                 grabbed_edge: edges,
