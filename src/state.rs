@@ -125,6 +125,7 @@ pub struct CanvasWindow {
     /// Manually saved positions for TreeView mode.
     pub tree_x: Option<f64>,
     pub tree_y: Option<f64>,
+
     pub tree_width: i32,
     pub tree_height: i32,
     pub base_width: i32,
@@ -183,6 +184,10 @@ pub struct AeroWM {
     pub scale: f64,
 
     pub config: AeroWMConfig,
+
+    pub areas: HashMap<u32, Rectangle<f64, Logical>>,
+    pub marking_area: Option<u32>,
+    pub marking_area_start: Option<Point<f64, Logical>>,
 
     // Cursor
     pub cursor_icon: CursorImageStatus,
@@ -318,6 +323,9 @@ impl AeroWM {
             zoom: 1.0,
             gap: config.gap,
             config,
+            areas: HashMap::new(),
+            marking_area: None,
+            marking_area_start: None,
             background_texture: None,
             background_image_size: None,
             background_shader_prog: None,

@@ -1,11 +1,11 @@
 use smithay::{
-    backend::{input::{
+    backend::input::{
         AbsolutePositionEvent, Axis, AxisSource, ButtonState, Event, InputBackend, InputEvent,
         KeyState, KeyboardKeyEvent, PointerAxisEvent, PointerButtonEvent, PointerMotionEvent,
-    }}, desktop::WindowSurfaceType, input::{
-        keyboard::{FilterResult},
+    }, desktop::WindowSurfaceType, input::{
+        keyboard::FilterResult,
         pointer::{AxisFrame, ButtonEvent, CursorIcon, CursorImageStatus, Focus, GrabStartData as PointerGrabStartData, MotionEvent},
-    }, reexports::{wayland_protocols::xdg::shell::server::xdg_toplevel::ResizeEdge, wayland_server::protocol::wl_surface::WlSurface}, utils::{Logical, Point, SERIAL_COUNTER},
+    }, reexports::{wayland_protocols::xdg::shell::server::xdg_toplevel::ResizeEdge, wayland_server::protocol::wl_surface::WlSurface}, utils::{Logical, Point, Rectangle, SERIAL_COUNTER},
 };
 
 use crate::{AeroWM, grabs::{PanCanvasGrab, ResizeSurfaceGrab}, keybind::{Trigger, Action}, state::{CanvasWindow, ModifierKey, ViewMode}};
@@ -296,6 +296,35 @@ impl AeroWM {
 
                 const BTN_MIDDLE: u32 = 0x112;
                 const BTN_LEFT: u32 = 0x110;
+                if ButtonState::Pressed == button_state && !pointer.is_grabbed()
+                    && button == BTN_LEFT && self.marking_area.is_some() 
+                {
+                    let canvas_pos = Point::new(
+                        self.cursor_position.x / self.zoom + self.viewport_x,
+                        self.cursor_position.y / self.zoom + self.viewport_y
+                    );
+                    self.marking_area_start = Some(canvas_pos);
+                    return;
+                }
+                if ButtonState::Released == button_state && !pointer.is_grabbed()
+                    && button == BTN_LEFT && self.marking_area.is_some() && self.marking_area_start.is_some()
+                {
+                    let id = self.marking_area.unwrap();
+                    let start = self.marking_area_start.unwrap();
+                    let end: Point<f64, Logical> = Point::new(
+                        self.cursor_position.x / self.zoom + self.viewport_x,
+                        self.cursor_position.y / self.zoom + self.viewport_y,
+                    );
+                    let rect: Rectangle<f64, Logical> = Rectangle::from_extremities(
+                        (start.x.min(end.x), start.y.min(end.y)), 
+                        (start.x.max(end.x), start.y.max(end.y)),
+                    );
+                    self.areas.insert(id, rect);
+                    eprintln!("area {} saved: {:?}", id, rect);
+                    self.marking_area = None;
+                    self.marking_area_start = None;
+                    return;
+                }
 
                 if ButtonState::Pressed == button_state && !pointer.is_grabbed()
                     && button == BTN_LEFT && main_mod && !under.is_none()

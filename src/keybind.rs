@@ -39,6 +39,8 @@ pub enum Action {
     Pan(f64, f64),
     Resize(i32, i32),
     SwitchVT(u8),
+    MarkArea,
+    GoToArea(u32),
 }
 pub fn parse_keybind(s: &str) -> Result<ParsedKeybind, Error> {
     let parts: Vec<String> = s.split("+").map(|string| string.trim().to_lowercase()).collect();
@@ -104,7 +106,13 @@ pub fn parse_action(action: &str, args: Option<String>) -> Result<Action, Error>
             let n = args.ok_or_else(|| Error::runtime("switch_vt needs a number"))?
                 .parse::<u8>().map_err(|e| Error::runtime(e.to_string()))?;
             Ok(Action::SwitchVT(n))
-        }
+        },
+        "mark_area" => Ok(Action::MarkArea),
+        "goto_area" => {
+            let n = args.ok_or_else(|| Error::runtime("goto_area needs a number"))?
+                .parse::<u32>().map_err(|_| Error::runtime("invalid area number"))?;
+            Ok(Action::GoToArea(n))
+        },
         _ => Err(Error::runtime("action type not supported"))
     }
 }
@@ -131,6 +139,13 @@ impl AeroWM {
             Action::Pan(x, y) => self.pan(*x, *y),
             Action::Resize(x, y) => self.resize_focused(*x, *y),
             Action::SwitchVT(n) => self.session.as_mut().unwrap().change_vt(*n as i32).unwrap(),
+            Action::MarkArea => {
+                let next = self.areas.keys().max().map(|n| n + 1).unwrap_or(1);
+                self.marking_area = Some(next);
+                self.marking_area_start = None;
+                eprintln!("marking_area {} - drag to define", next);
+            },
+            Action::GoToArea(n) => self.goto_area(*n),
         }
     }
 
@@ -165,14 +180,41 @@ impl AeroWM {
         }
     }
 
+    fn goto_area(&mut self, n: u32) {
+        if self.areas.contains_key(&n) == false { return; }
+        let area = self.areas[&n];
+        let (aw, ah) = (area.size.w, area.size.h);
+        let (sw, sh) = {
+            let o = self.space.outputs().next().unwrap();
+            let g = self.space.output_geometry(o).unwrap(); 
+            (g.size.w, g.size.h)
+        };
+        let zoom_target = sh as f64 / ah;
+        let cx = area.loc.x + area.size.w / 2.0;
+        let cy = area.loc.y + area.size.h / 2.0;
+        self.zoom_target = zoom_target;
+        self.zoom_anim_start = self.zoom;
+        self.viewport_target_x = cx - (sw / 2) as f64 / zoom_target;
+        self.viewport_target_y = cy - (sh / 2) as f64 / zoom_target;
+        self.begin_animation();
+    }
+
     fn switch_view(&mut self) {
         self.view_mode = match self.view_mode {
             ViewMode::Tiling => {
                 self.zoom = 1.0;
+                self.zoom_target = 1.0;
+                self.zoom_anim_start = 1.0;
                 ViewMode::TreeView
             },
             ViewMode::TreeView => {
+                for cw in &mut self.windows {
+                    cw.tree_x = Some(cw.canvas_x);
+                    cw.tree_y = Some(cw.canvas_y);
+                }
                 self.zoom = 1.0;
+                self.zoom_target = 1.0;
+                self.zoom_anim_start = 1.0;
                 ViewMode::Tiling
             }
         };
