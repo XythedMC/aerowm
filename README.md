@@ -131,7 +131,7 @@ Modifiers: `Ctrl`, `Alt`, `Shift`, `Super`. Mouse buttons: `left`, `right`, `mid
 - ~~**XWayland support** - compatibility with X11 applications~~
 - **Multi-output support** - multiple monitors
 - **wlr protocols** - layer shell (bars, docks, notifications), screencopy, data control, idle notify, session lock
-- **Background images and shaders** - image backgrounds and custom GLSL shaders
+- ~~**Background images and shaders** - image backgrounds and custom GLSL shaders~~
 - **Trackpad support** - gestures for panning, zooming, and switching views
 - **Animations** - window open/close transitions
 - **Scratchpad** - floating windows outside the tree
