@@ -119,7 +119,7 @@ impl AeroWM {
             }
             Action::Quit => {
                 remove_file("/tmp/AeroWM.sock").expect("failed to remove socket file while exiting");
-                self.loop_signal.stop();
+                self.pending_screenshot = true;
             },
             Action::SwitchView => self.switch_view(),
             Action::Fullscreen => self.toggle_fullscreen(),

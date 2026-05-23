@@ -157,7 +157,7 @@ pub fn create_config() -> anyhow::Result<()>  {
     unfocused_border_color = {0, 0, 0},
     background_type = "color",
     background_color = {26, 26, 26},
-    background_image = "",
+    background_image = "/$HOME/current_wallpaper.png",
     background_shader = "",
     corner_rounding = 32.0,
     tile_distance = 8,

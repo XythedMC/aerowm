@@ -268,6 +268,10 @@ pub fn build_render_elements(
     config: &AeroWMConfig,
     cursor_position: Point<f64, Logical>,
     cursor_texture: &Option<GlesTexture>,
+    background_texture: &Option<GlesTexture>,
+    background_shader_prog: &Option<GlesPixelProgram>,
+    background_image_size: &Option<(i32, i32)>,
+    elapsed_secs: f32,
     renderer: &mut GlesRenderer,
     line_prog: &Option<GlesPixelProgram>, 
     solid_prog: &Option<GlesPixelProgram>,
@@ -344,6 +348,78 @@ pub fn build_render_elements(
         if let Some(prog) = &line_prog {
             overlays.extend(connector_elements(windows, zoom, viewport_x, viewport_y, prog).into_iter().map(AeroWMElement::Shader));
         }
+    }
+
+    match config.background_type.as_str() {
+        "image" => {
+            eprintln!("drawing image background");
+            if let Some(tex) = background_texture {
+                let (sw, sh) = {
+                    let o = space.outputs().next().unwrap();
+                    let g = space.output_geometry(o).unwrap(); 
+                    (g.size.w, g.size.h)
+                };
+
+                let buffer = TextureBuffer::from_texture(
+                    renderer, 
+                    tex.clone(), 
+                    1, 
+                    Transform::Normal, 
+                    None,
+                );
+                let (iw, ih) = background_image_size.expect("Background image size not passed to build_render_elements");
+                let bg_scale = f64::min(sw as f64 / iw as f64, sh as f64 / ih as f64);
+                let tile_w = (iw as f64 * bg_scale) as i32;
+                let tile_h = (ih as f64 * bg_scale) as i32;
+
+                let i_start = (viewport_x / tile_w as f64).floor() as i32;
+                let i_end = ((viewport_x + sw as f64 / zoom) / tile_w as f64).ceil() as i32;
+                let j_start = (viewport_y / tile_h as f64).floor() as i32;
+                let j_end = ((viewport_y + sh as f64 / zoom) / tile_h as f64).ceil() as i32;
+
+                for j in j_start..=j_end {
+                    for i in i_start..=i_end {
+                        let screen_x = (i as f64 * tile_w as f64 - viewport_x) * zoom;
+                        let screen_y = (j as f64 * tile_h as f64 - viewport_y) * zoom;
+                        eprintln!("scale: {} bg_scale: {} sw: {} sh: {}", scale, bg_scale, sw, sh);
+                        overlays.push(AeroWMElement::Texture(
+                            TextureRenderElement::from_texture_buffer(
+                                Point::from((screen_x, screen_y)).to_physical_precise_round(scale),
+                                &buffer,
+                                Some(1.0_f32),
+                                Some(Rectangle { loc: (0.0, 0.0).into(), size: (iw as f64, ih as f64).into() }),
+                                Some(Size::new((tile_w as f64 * zoom) as i32, (tile_h as f64 * zoom) as i32)),
+                                Kind::Unspecified,
+                            )
+                        ));
+                    }
+                }
+
+            }
+        }
+        "shader" => {
+            if let Some(prog) = background_shader_prog {
+                let (sw, sh) = {
+                    let o = space.outputs().next().unwrap();
+                    let g = space.output_geometry(o).unwrap();
+                    (g.size.w, g.size.h)
+                };
+                overlays.push(AeroWMElement::Shader(PixelShaderElement::new(
+                    prog.clone(),
+                    Rectangle { loc: (0, 0).into(), size: (sw, sh).into() },
+                    None,
+                    1.0,
+                    vec![
+                        Uniform::new("u_time", elapsed_secs),
+                        Uniform::new("u_resolution", (sw as f32, sh as f32)),
+                        Uniform::new("u_viewport", (viewport_x as f32, viewport_y as f32)),
+                        Uniform::new("u_zoom", zoom as f32),
+                    ],
+                    Kind::Unspecified,
+                )));
+            }
+        }
+        _ => {}
     }
 
     overlays

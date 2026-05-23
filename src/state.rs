@@ -8,7 +8,7 @@ use smithay::{
             Color32F, 
             ImportMem, 
             element::{surface::WaylandSurfaceRenderElement, texture::TextureRenderElement}, 
-            gles::{GlesPixelProgram, GlesRenderer, GlesTexture, element::PixelShaderElement}
+            gles::{GlesPixelProgram, GlesRenderer, GlesTexture, Uniform, UniformName, UniformType, element::PixelShaderElement}
         }, 
         session::libseat::LibSeatSession
     }, 
@@ -41,8 +41,10 @@ use smithay::{
     }, xwayland::{X11Wm, XWayland, XWaylandEvent}
 };
 
-use xcursor::{CursorTheme, parser::parse_xcursor};
+use tokio::sync::broadcast::Sender;
+use xcursor::{CursorTheme, parser::{Image, parse_xcursor}};
 use crate::{handlers::config::AeroWMConfig, rendering::build_render_elements};
+use image::ImageReader;
 
 smithay::backend::renderer::element::render_elements! {
     pub AeroWMElement <=GlesRenderer>;
@@ -155,42 +157,51 @@ pub struct AeroWM {
     pub viewport_target_x: f64,
     pub viewport_target_y: f64,
 
+    // Zoom
     pub zoom_anim_start: f64,
     pub zoom_target: f64,
     pub zoom_returning: bool,
     pub zoom_animating: bool,
 
-    pub scale: f64,
-
+    // Animations
     pub(crate) viewport_anim_start_x: f64,
     pub(crate) viewport_anim_start_y: f64,
     /// When Some, a 300 ms cubic ease-out animation is in progress.
     pub anim_start: Option<Instant>,
 
+    // IDs
     pub next_window_id: u32,
-    /// The ID of the window that currently holds keyboard focus.
     pub focused_window_id: Option<u32>,
     pub tiling_root_id: Option<u32>,
+    pub tiling_visible_ids: Vec<u32>,
+
+    // Viewing
     pub view_mode: ViewMode,
     pub zoom: f64,
     pub gap: f64,
+    pub scale: f64,
 
     pub config: AeroWMConfig,
+
+    // Cursor
     pub cursor_icon: CursorImageStatus,
     pub cursor_position: Point<f64, Logical>,
     pub cursor_theme: CursorTheme,
     pub current_cursor: String,
     pub cursor_texture: Option<GlesTexture>,
 
+    // Dragging
     pub active_drag: bool, 
     pub dragged_window: Option<(u32, Point<f64, Logical>)>,
 
     pub layer_surfaces: Vec<LayerSurface>,
-    pub x11_override_redirect: Vec<Window>,
-    pub background_type: BackgroundType,
-    
-    pub tiling_visible_ids: Vec<u32>,
 
+    pub background_type: BackgroundType,
+    pub background_texture: Option<GlesTexture>,
+    pub background_image_size: Option<(i32, i32)>,
+    pub background_shader_prog: Option<GlesPixelProgram>,
+
+    // States/Managers
     pub compositor_state: CompositorState,
     pub xdg_shell_state: XdgShellState,
     pub cursor_shape_manager_state: CursorShapeManagerState,
@@ -208,7 +219,9 @@ pub struct AeroWM {
     pub popups: PopupManager,
 
     pub seat: Seat<Self>,
-    pub event_tx: Option<tokio::sync::broadcast::Sender<crate::ipc::IpcEvent>>,
+
+    // IPC
+    pub event_tx: Option<Sender<crate::ipc::IpcEvent>>,
 
     // Xwayland
     pub xwayland: Option<RegistrationToken>,
@@ -216,10 +229,12 @@ pub struct AeroWM {
     pub xwayland_shell_state: XWaylandShellState,
     pub x11_display_number: Option<u32>,
     pub z_counter: u32,
+    pub x11_override_redirect: Vec<Window>,
 
     pub main_modifier: ModifierKey,
     /// DMABuf buffers waiting to be imported by the renderer on the next frame.
     pub pending_dmabufs: Vec<(Dmabuf, ImportNotifier)>,
+    pub pending_screenshot: bool,
 }
 
 impl AeroWM {
@@ -302,6 +317,9 @@ impl AeroWM {
             zoom: 1.0,
             gap: config.gap,
             config,
+            background_texture: None,
+            background_image_size: None,
+            background_shader_prog: None,
             cursor_icon,
             cursor_position: Point::new(0.0, 0.0),
             cursor_theme: CursorTheme::load("default"),
@@ -333,6 +351,7 @@ impl AeroWM {
             event_tx: None,
             main_modifier,
             pending_dmabufs: Vec::new(),
+            pending_screenshot: false,
             xwayland: Some(xwayland),
             xwm: None,
             xwayland_shell_state,
@@ -781,6 +800,51 @@ impl AeroWM {
 
                 compositor.frame_submitted().ok();
 
+                if self.background_texture.is_none() && self.background_shader_prog.is_none() {
+                    let renderer = &mut gpu_data.renderer;
+                    match self.background_type {
+                        BackgroundType::Image if self.background_texture.is_none() => {
+                            let img = ImageReader::open(
+                                std::path::Path::new(&self.config.background_image.clone().unwrap())
+                            ).expect("Failed to open background image from config").decode().expect("Failed to decode image").into_rgba8();
+
+                            let width = img.width() as i32;
+                            let height = img.height() as i32;
+                            let rgba_bytes = img.into_raw();
+
+                            self.background_texture = match renderer.import_memory(
+                                &rgba_bytes,
+                                Fourcc::Abgr8888,
+                                Size::new(width, height),
+                                false,
+                            ) {
+                                Ok(tex) => { eprintln!("background texture imported ok"); Some(tex) }
+                                Err(e) => { eprintln!("background texture import failed: {:?}", e); None }
+                            };
+
+                            self.background_image_size = Some((width, height));
+                        },
+                        BackgroundType::Shader if self.background_shader_prog.is_none() => {
+                            if let Some(path) = &self.config.background_shader.clone() {
+                                if let Ok(src) = std::fs::read_to_string(path) {
+                                    self.background_shader_prog = renderer.compile_custom_pixel_shader(
+                                        &src,
+                                        &[
+                                            UniformName::new("u_time", UniformType::_1f),
+                                            UniformName::new("u_resolution", UniformType::_2f),
+                                            UniformName::new("u_viewport", UniformType::_2f),
+                                            UniformName::new("u_zoom", UniformType::_1f),
+                                        ],
+                                    ).ok();
+                                }
+                            }
+                        }
+                        BackgroundType::Color => {}
+                        _ => {}
+                    }
+                    
+                }
+
                 let renderer = &mut gpu_data.renderer;
 
                 if let CursorImageStatus::Named(icon) = &self.cursor_icon {
@@ -807,6 +871,7 @@ impl AeroWM {
                     }
                 }
 
+
                 let elements = build_render_elements(
                     &self.windows,
                     &self.x11_override_redirect,
@@ -820,6 +885,10 @@ impl AeroWM {
                     &self.config,
                     self.cursor_position,
                     &self.cursor_texture,
+                    &self.background_texture,
+                    &self.background_shader_prog,
+                    &self.background_image_size,
+                    self.start_time.elapsed().as_secs_f32(),
                     renderer, 
                     &gpu_data.line_prog, 
                     &gpu_data.solid_prog, 
@@ -829,7 +898,7 @@ impl AeroWM {
                 let render_frame_result = compositor.render_frame(
                     renderer,
                     &elements,
-                    Color32F::from([clear_color[0], clear_color[1], clear_color[2], 1.0]),
+                    if self.background_type == BackgroundType::Color {Color32F::from([clear_color[0], clear_color[1], clear_color[2], 1.0])} else {Color32F::from([0.0,0.0,0.0,0.0])} ,
                     FrameFlags::empty(),
                 ).expect("Failed to render frame");
 
@@ -837,6 +906,44 @@ impl AeroWM {
                     if let Err(e) = compositor.queue_frame(()) {
                         eprintln!("queue_frame error for crtc {:?}: {:?}", handle, e);
                     }
+                }
+
+                if self.pending_screenshot {
+                    let (sw, sh) = self.space
+                        .outputs()
+                        .next()
+                        .and_then(|o| self.space.output_geometry(o))
+                        .map(|g| (g.size.w, g.size.h))
+                        .unwrap_or((1920, 1080));
+                    let mut pixels = vec![0u8; (sw * sh * 4) as usize];
+                    let _ = renderer.with_context(|gl| unsafe {
+                        gl.ReadPixels(
+                            0, 0, sw, sh,
+                            smithay::backend::renderer::gles::ffi::RGBA,
+                            smithay::backend::renderer::gles::ffi::UNSIGNED_BYTE,
+                            pixels.as_mut_ptr() as *mut _,
+                        );
+                    });
+                    // Flip vertically — GL origin is bottom-left, image expects top-left
+                    let row_bytes = (sw * 4) as usize;
+                    let mut flipped = vec![0u8; pixels.len()];
+                    for y in 0..sh as usize {
+                        let src_y = sh as usize - 1 - y;
+                        flipped[y * row_bytes..(y + 1) * row_bytes]
+                            .copy_from_slice(&pixels[src_y * row_bytes..(src_y + 1) * row_bytes]);
+                    }
+                    match image::save_buffer(
+                        "/tmp/aerowm-last.png",
+                        &flipped,
+                        sw as u32,
+                        sh as u32,
+                        image::ColorType::Rgba8,
+                    ) {
+                        Ok(_) => eprintln!("screenshot saved to /tmp/aerowm-last.png"),
+                        Err(e) => eprintln!("failed to save screenshot: {:?}", e),
+                    }
+                    self.pending_screenshot = false;
+                    self.loop_signal.stop();
                 }
 
                 self.space.elements().for_each(|window| {
