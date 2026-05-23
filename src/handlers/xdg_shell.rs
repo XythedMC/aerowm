@@ -41,8 +41,8 @@ impl XdgShellHandler for AeroWM {
             (size.w, size.h)
         });
 
-        let canvas_x = self.cursor_position.x + self.viewport_x;
-        let canvas_y = self.cursor_position.y + self.viewport_y;
+        let canvas_x = self.cursor_position.x / self.zoom + self.viewport_target_x;
+        let canvas_y = self.cursor_position.y / self.zoom + self.viewport_target_y;
 
         let window = Window::new_wayland_window(surface);
         let screen_x = self.cursor_position.x as i32;
@@ -99,7 +99,7 @@ impl XdgShellHandler for AeroWM {
         // The new window is already placed at viewport center above.
         if self.view_mode == ViewMode::Tiling {
             self.apply_layout();
-        }
+        } 
     }
 
     fn toplevel_destroyed(&mut self, surface: ToplevelSurface) {

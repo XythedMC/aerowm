@@ -15,6 +15,7 @@ impl AeroWM {
         cw: &CanvasWindow,
         px: i32, py: i32,
     ) -> ResizeEdge {
+        if cw.id != self.focused_window_id.unwrap() { return ResizeEdge::None }
         let wx = ((cw.canvas_x - self.viewport_x) * self.zoom) as i32;
         let wy = ((cw.canvas_y - self.viewport_y) * self.zoom) as i32;
         let ww = (cw.base_width as f64 * self.zoom) as i32;
@@ -43,6 +44,7 @@ impl AeroWM {
         px: i32, py: i32,
     ) -> CursorImageStatus {
         for window in self.windows.iter().rev() {
+            if window.id != self.focused_window_id.unwrap() { return CursorImageStatus::default_named() }
             match self.window_edge_at(window, px, py) {
                 ResizeEdge::None => {
                     // If the mouse is inside this window's body, we should stop checking background windows

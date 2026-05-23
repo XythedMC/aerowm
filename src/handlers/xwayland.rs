@@ -46,8 +46,8 @@ impl XwmHandler for AeroWM {
             }).ok();
         }
 
-        let canvas_x = self.cursor_position.x / self.zoom + self.viewport_x;
-        let canvas_y = self.cursor_position.y / self.zoom + self.viewport_y;
+        let canvas_x = self.cursor_position.x / self.zoom + self.viewport_target_x;
+        let canvas_y = self.cursor_position.y / self.zoom + self.viewport_target_y;
 
         let screen_x = self.cursor_position.x as i32;
         let screen_y = self.cursor_position.y as i32;

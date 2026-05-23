@@ -168,16 +168,11 @@ impl AeroWM {
     fn switch_view(&mut self) {
         self.view_mode = match self.view_mode {
             ViewMode::Tiling => {
-                self.zoom_anim_start = self.zoom;
-                self.zoom_target = 0.7;
-                self.zoom_animating = true;
+                self.zoom = 1.0;
                 ViewMode::TreeView
             },
             ViewMode::TreeView => {
-                self.tiling_root_id = self.focused_window_id;
                 self.zoom = 1.0;
-                self.zoom_target = 1.0;
-                self.zoom_anim_start = 1.0;
                 ViewMode::Tiling
             }
         };

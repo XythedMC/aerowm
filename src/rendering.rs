@@ -1,11 +1,9 @@
 use smithay::{
-    backend::{
-        renderer::{
+    backend::renderer::{
             element::{AsRenderElements, Kind, surface::WaylandSurfaceRenderElement, texture::{TextureBuffer, TextureRenderElement}, utils::RescaleRenderElement}, gles::{
                 GlesPixelProgram, GlesRenderer, GlesTexture, Uniform, UniformName, UniformType, element::PixelShaderElement
             }
-        },
-    }, desktop::{Space, Window}, utils::{Logical, Point, Rectangle, Scale, Size, Transform}
+        }, desktop::{Space, Window}, utils::{Logical, Physical, Point, Rectangle, Scale, Size, Transform}
 };
 
 use crate::{handlers::config::AeroWMConfig, state::{CanvasWindow, AeroWMElement, ViewMode}};

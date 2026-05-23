@@ -15,7 +15,7 @@ use smithay::{
     desktop::{LayerSurface, PopupManager, Space, Window, WindowSurfaceType, layer_map_for_output}, 
     input::{Seat, SeatState, pointer::CursorImageStatus}, 
     reexports::{
-        calloop::{EventLoop, Interest, LoopSignal, Mode, PostAction, RegistrationToken, generic::Generic}, drm::control::crtc::Handle, wayland_protocols::xwayland, wayland_server::{
+        calloop::{EventLoop, Interest, LoopSignal, Mode, PostAction, RegistrationToken, generic::Generic}, drm::control::crtc::Handle, wayland_protocols::{xdg::shell::server::xdg_toplevel::ResizeEdge, xwayland}, wayland_server::{
             Display, 
             DisplayHandle, 
             backend::{ClientData, ClientId, DisconnectReason}, 
@@ -105,7 +105,7 @@ pub struct CanvasWindow {
     pub canvas_x: f64,
     pub canvas_y: f64,
 
-    pub resize_edge: smithay::reexports::wayland_protocols::xdg::shell::server::xdg_toplevel::ResizeEdge,
+    pub resize_edge: ResizeEdge,
     pub resize_initial_x: f64,
     pub resize_initial_y: f64,
     pub resize_initial_w: i32,
@@ -117,6 +117,7 @@ pub struct CanvasWindow {
     /// Snapshot of canvas position when the current animation began.
     pub(crate) anim_start_x: f64,
     pub(crate) anim_start_y: f64,
+
     /// None means this window is a tree root.
     pub parent_id: Option<u32>,
     /// IDs of direct children, in open order.
@@ -1069,6 +1070,7 @@ impl AeroWM {
             cw.canvas_x = cw.anim_start_x + (cw.target_x - cw.anim_start_x) * ease_t;
             cw.canvas_y = cw.anim_start_y + (cw.target_y - cw.anim_start_y) * ease_t;
         }
+
         self.viewport_x = self.viewport_anim_start_x
             + (self.viewport_target_x - self.viewport_anim_start_x) * ease_t;
         self.viewport_y = self.viewport_anim_start_y
