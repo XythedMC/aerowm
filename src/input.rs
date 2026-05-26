@@ -8,7 +8,7 @@ use smithay::{
     }, reexports::{wayland_protocols::xdg::shell::server::xdg_toplevel::ResizeEdge, wayland_server::protocol::wl_surface::WlSurface}, utils::{Logical, Point, Rectangle, SERIAL_COUNTER},
 };
 
-use crate::{AeroWM, grabs::{PanCanvasGrab, ResizeSurfaceGrab}, keybind::{Trigger, Action}, state::{CanvasWindow, ModifierKey, ViewMode}};
+use crate::{AeroWM, grabs::{PanCanvasGrab, ResizeSurfaceGrab}, keybind::{self, Action, Trigger}, state::{CanvasWindow, ModifierKey, ViewMode}};
 impl AeroWM {
     fn window_edge_at(
         &self,
@@ -73,7 +73,7 @@ impl AeroWM {
     pub fn process_input_event<I: InputBackend>(&mut self, event: InputEvent<I>) { 
         match event {
             InputEvent::Keyboard { event, .. } => {
-                
+    
                 let serial = SERIAL_COUNTER.next_serial();
                 let time = Event::time_msec(&event);
                 let key_state = event.state();
@@ -88,17 +88,28 @@ impl AeroWM {
                     serial,
                     time,
                     |data, modifiers, handle| {
-                        if key_state != KeyState::Pressed {
-                            return FilterResult::Forward;
-                        }
-
                         let sym = handle.modified_sym();
                         
-                        for (keybind, action) in &data.config.keybinds {
-                            if let Trigger::Key(keysym)  = keybind.trigger {
-                                if keysym == sym && data.mods_match(&keybind.mods, modifiers) {
-                                    pending_action = Some(action.clone());
-                                    return FilterResult::Intercept(());
+                        if key_state == KeyState::Pressed {
+                            for (keybind, action) in &data.config.keybinds {
+                                if let Trigger::Key(keysym) = keybind.trigger {
+                                    if keysym == sym && data.mods_match(&keybind.mods, modifiers) {
+                                        if let Action::ShowAreas = action {
+                                            data.show_areas = true;
+                                            return FilterResult::Intercept(());
+                                        }
+                                        pending_action = Some(action.clone());
+                                        return FilterResult::Intercept(());
+                                    }
+                                }
+                            }
+                        } else {
+                            for (keybind, action) in &data.config.keybinds {
+                                if let (Trigger::Key(keysym), Action::ShowAreas) = (&keybind.trigger, action) {
+                                    if *keysym == sym {
+                                        data.show_areas = false;
+                                        break;
+                                    }
                                 }
                             }
                         }

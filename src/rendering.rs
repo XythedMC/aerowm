@@ -1,9 +1,11 @@
+use std::collections::HashMap;
+
 use smithay::{
     backend::renderer::{
-            element::{AsRenderElements, Kind, surface::WaylandSurfaceRenderElement, texture::{TextureBuffer, TextureRenderElement}, utils::RescaleRenderElement}, gles::{
+            Color32F, element::{AsRenderElements, Kind, solid::{SolidColorBuffer, SolidColorRenderElement}, surface::WaylandSurfaceRenderElement, texture::{TextureBuffer, TextureRenderElement}, utils::RescaleRenderElement}, gles::{
                 GlesPixelProgram, GlesRenderer, GlesTexture, Uniform, UniformName, UniformType, element::PixelShaderElement
             }
-        }, desktop::{Space, Window}, utils::{Logical, Physical, Point, Rectangle, Scale, Size, Transform}
+        }, desktop::{Space, Window}, utils::{Logical, Point, Rectangle, Scale, Size, Transform}
 };
 
 use crate::{handlers::config::AeroWMConfig, state::{CanvasWindow, AeroWMElement, ViewMode}};
@@ -186,11 +188,11 @@ pub fn focus_border_elements(
     let mut color = [0.0, 0.0, 0.0, 1.0];
 
     if Some(cw.id) == fid {
-        let [r, g, b] = config.focused_border_color;
-        color = [r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0, 1.0];
+        let [r, g, b, a] = config.focused_border_color;
+        color = [r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0, a as f32 / 255.0];
     } else {
-        let [r, g, b] = config.unfocused_border_color;
-        color = [r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0, 1.0];
+        let [r, g, b, a] = config.unfocused_border_color;
+        color = [r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0, a as f32 / 255.0];
     }
 
     let area = Rectangle { loc: (sx, sy).into(), size: (ww, wh).into() };
@@ -264,6 +266,8 @@ pub fn build_render_elements(
     viewport_x: f64,
     viewport_y: f64,
     config: &AeroWMConfig,
+    show_areas: &bool,
+    areas: &HashMap<u32, Rectangle<f64, Logical>>,
     cursor_position: Point<f64, Logical>,
     cursor_texture: &Option<GlesTexture>,
     background_texture: &Option<GlesTexture>,
@@ -320,6 +324,32 @@ pub fn build_render_elements(
                     1.0,
                 ).into_iter().map(AeroWMElement::Surface)
             );
+        }
+    }
+
+    let mut push_strip = |loc: Point<f64, Logical>, size: Size<i32, Logical>, color: [u8; 4]| {
+        let buf = SolidColorBuffer::new(size, Color32F::new(color[0] as f32 / 255.0, color[1] as f32 / 255.0, color[2] as f32 / 255.0, color[3] as f32 / 255.0));
+        let elem = SolidColorRenderElement::from_buffer(
+            &buf, 
+            loc.to_physical_precise_round(scale), 
+            scale, 
+            1.0, 
+            Kind::Unspecified,
+        );
+        overlays.push(AeroWMElement::Solid(elem));
+    };
+    if *show_areas {
+        for (id, rect) in areas {
+            let color = config.area_colors[(*id as usize - 1) % config.area_colors.len()];
+            let sx = (rect.loc.x - viewport_x) * zoom;
+            let sy = (rect.loc.y - viewport_y) * zoom;
+            let sw = rect.size.w * zoom;
+            let sh = rect.size.h * zoom;
+            let t = config.area_border_thickness;
+            push_strip(Point::new(sx, sy), Size::new(sw as i32, t), color);
+            push_strip(Point::new(sx, sy + sh - t as f64), Size::new(sw as i32, t), color);
+            push_strip(Point::new(sx, sy), Size::new(t, sh  as i32), color);
+            push_strip(Point::new(sx + sw - t as f64, sy), Size::new(t, sw as i32), color);
         }
     }
 

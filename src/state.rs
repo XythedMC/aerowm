@@ -1,4 +1,4 @@
-use std::{collections::HashMap, env::{self, set_var}, ffi::OsString, iter::empty, process::{Command, Stdio}, sync::Arc, time::{Duration, Instant}};
+use std::{collections::HashMap, env::set_var, ffi::OsString, iter::empty, process::{Command, Stdio}, sync::Arc, time::{Duration, Instant}};
 
 use smithay::{
     backend::{
@@ -7,15 +7,15 @@ use smithay::{
         renderer::{
             Color32F, 
             ImportMem, 
-            element::{surface::WaylandSurfaceRenderElement, texture::TextureRenderElement}, 
-            gles::{GlesPixelProgram, GlesRenderer, GlesTexture, Uniform, UniformName, UniformType, element::PixelShaderElement}
+            element::{solid::SolidColorRenderElement, surface::WaylandSurfaceRenderElement, texture::TextureRenderElement, utils::RescaleRenderElement}, 
+            gles::{GlesPixelProgram, GlesRenderer, GlesTexture, UniformName, UniformType, element::PixelShaderElement}
         }, 
         session::libseat::LibSeatSession
     }, 
     desktop::{LayerSurface, PopupManager, Space, Window, WindowSurfaceType, layer_map_for_output}, 
     input::{Seat, SeatState, pointer::CursorImageStatus}, 
     reexports::{
-        calloop::{EventLoop, Interest, LoopSignal, Mode, PostAction, RegistrationToken, generic::Generic}, drm::control::crtc::Handle, wayland_protocols::{xdg::shell::server::xdg_toplevel::ResizeEdge, xwayland}, wayland_server::{
+        calloop::{EventLoop, Interest, LoopSignal, Mode, PostAction, RegistrationToken, generic::Generic}, drm::control::crtc::Handle, wayland_protocols::xdg::shell::server::xdg_toplevel::ResizeEdge, wayland_server::{
             Display, 
             DisplayHandle, 
             backend::{ClientData, ClientId, DisconnectReason}, 
@@ -42,8 +42,8 @@ use smithay::{
 };
 
 use tokio::sync::broadcast::Sender;
-use xcursor::{CursorTheme, parser::{Image, parse_xcursor}};
-use crate::{handlers::config::AeroWMConfig, rendering::build_render_elements};
+use xcursor::{CursorTheme, parser::parse_xcursor};
+use crate::{handlers::config::AeroWMConfig, keybind::ParsedKeybind, rendering::build_render_elements};
 use image::ImageReader;
 
 smithay::backend::renderer::element::render_elements! {
@@ -51,7 +51,8 @@ smithay::backend::renderer::element::render_elements! {
     Shader = PixelShaderElement,
     Texture = TextureRenderElement<GlesTexture>,
     Surface = WaylandSurfaceRenderElement<GlesRenderer>,
-    ScaledSurface = smithay::backend::renderer::element::utils::RescaleRenderElement<WaylandSurfaceRenderElement<GlesRenderer>>,
+    ScaledSurface = RescaleRenderElement<WaylandSurfaceRenderElement<GlesRenderer>>,
+    Solid = SolidColorRenderElement,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Default)]
@@ -188,6 +189,9 @@ pub struct AeroWM {
     pub areas: HashMap<u32, Rectangle<f64, Logical>>,
     pub marking_area: Option<u32>,
     pub marking_area_start: Option<Point<f64, Logical>>,
+    pub current_area: Option<u32>,
+    pub show_areas: bool,
+    pub show_areas_combo: Option<ParsedKeybind>,
 
     // Cursor
     pub cursor_icon: CursorImageStatus,
@@ -326,6 +330,9 @@ impl AeroWM {
             areas: HashMap::new(),
             marking_area: None,
             marking_area_start: None,
+            current_area: None,
+            show_areas: false,
+            show_areas_combo: None,
             background_texture: None,
             background_image_size: None,
             background_shader_prog: None,
@@ -892,6 +899,8 @@ impl AeroWM {
                     self.viewport_x,
                     self.viewport_y,
                     &self.config,
+                    &self.show_areas,
+                    &self.areas,
                     self.cursor_position,
                     &self.cursor_texture,
                     &self.background_texture,

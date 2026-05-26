@@ -65,7 +65,7 @@ impl PointerGrab<AeroWM> for ResizeSurfaceGrab {
                         tl.with_pending_state(|s| { s.size = Some((new_width, new_height).into()); });
                         tl.send_pending_configure();
                     } else if let Some(x11) = cw.window.x11_surface() {
-                        let _ = x11.configure(Some(Rectangle::from_loc_and_size((0, 0), (new_width, new_height))));
+                        let _ = x11.configure(Some(Rectangle::new((0, 0).into(), (new_width, new_height).into())));
                     }
                 }
             }

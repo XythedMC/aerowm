@@ -1,6 +1,6 @@
 use std::fs::{remove_file};
 
-use mlua::{ Error };
+use anyhow::{Error, anyhow};
 use smithay::{backend::session::Session, input::keyboard::{Keysym, ModifiersState, xkb::{KEYSYM_CASE_INSENSITIVE, keysym_from_name}}};
 
 use crate::{AeroWM, state::{ModifierKey, ViewMode}};
@@ -41,11 +41,14 @@ pub enum Action {
     SwitchVT(u8),
     MarkArea,
     GoToArea(u32),
+    RemoveArea,
+    ShowAreas,
 }
+
 pub fn parse_keybind(s: &str) -> Result<ParsedKeybind, Error> {
     let parts: Vec<String> = s.split("+").map(|string| string.trim().to_lowercase()).collect();
     if !parts.contains(&String::from("ctrl")) && !parts.contains(&String::from("alt")) && !parts.contains(&String::from("shift")) && !parts.contains(&String::from("super")) {
-        return Err(Error::runtime(format!("modifiers for keybind {} dont exist", s)))
+        return Err(anyhow!(format!("modifiers for keybind {} dont exist", s)))
     } 
     let mut mods: Vec<ModifierKey> = Vec::new();
     let mut trigger: Option<Trigger> = None;
@@ -57,7 +60,7 @@ pub fn parse_keybind(s: &str) -> Result<ParsedKeybind, Error> {
             "super" => mods.push(ModifierKey::Super),
             name => {
                 if trigger.is_some() {
-                    return Err(Error::runtime("more than one key in keybind"))
+                    return Err(anyhow!("more than one key in keybind"))
                 }
 
                 trigger = Some(match name {
@@ -69,7 +72,7 @@ pub fn parse_keybind(s: &str) -> Result<ParsedKeybind, Error> {
             }
         }
     }
-    let trigger = trigger.ok_or_else(|| Error::runtime("no key or button in keybind"))?;
+    let trigger = trigger.ok_or_else(|| anyhow!("no key or button in keybind"))?;
     Ok(ParsedKeybind { mods, trigger })
 }
 
@@ -78,7 +81,7 @@ pub fn parse_action(action: &str, args: Option<String>) -> Result<Action, Error>
         "close" => Ok(Action::Close),
         "exec" => {
             if args.is_some() { Ok(Action::Exec(args.unwrap()))}
-            else { Err(Error::runtime("need arguments for this type of action"))}
+            else { Err(anyhow!("need arguments for this type of action"))}
         },
         "quit" => Ok(Action::Quit),
         "switch_view" => Ok(Action::SwitchView),
@@ -89,31 +92,33 @@ pub fn parse_action(action: &str, args: Option<String>) -> Result<Action, Error>
         "focus_zoom" => Ok(Action::FocusZoom),
         "reset_view" => Ok(Action::ResetView),
         "pan" => {
-            let arg = args.ok_or_else(|| Error::runtime("pan requires an argument"))?;
+            let arg = args.ok_or_else(|| anyhow!("pan requires an argument"))?;
             let mut parts = arg.splitn(2, ' ');
-            let x = parts.next().and_then(|s| s.parse().ok()).ok_or_else(|| Error::runtime("invalid pan x"))?;
-            let y = parts.next().and_then(|s| s.parse().ok()).ok_or_else(|| Error::runtime("invalid pan y"))?;
+            let x = parts.next().and_then(|s| s.parse().ok()).ok_or_else(|| anyhow!("invalid pan x"))?;
+            let y = parts.next().and_then(|s| s.parse().ok()).ok_or_else(|| anyhow!("invalid pan y"))?;
             Ok(Action::Pan(x, y))
         },
         "resize" => {
-            let arg = args.ok_or_else(|| Error::runtime("resize requires an argument"))?;
+            let arg = args.ok_or_else(|| anyhow!("resize requires an argument"))?;
             let mut parts = arg.splitn(2, ' ');
-            let x = parts.next().and_then(|s| s.parse().ok()).ok_or_else(|| Error::runtime("invalid resize x"))?;
-            let y = parts.next().and_then(|s| s.parse().ok()).ok_or_else(|| Error::runtime("invalid resize y"))?;
+            let x = parts.next().and_then(|s| s.parse().ok()).ok_or_else(|| anyhow!("invalid resize x"))?;
+            let y = parts.next().and_then(|s| s.parse().ok()).ok_or_else(|| anyhow!("invalid resize y"))?;
             Ok(Action::Resize(x, y))
         },
         "switch_vt" => {
-            let n = args.ok_or_else(|| Error::runtime("switch_vt needs a number"))?
-                .parse::<u8>().map_err(|e| Error::runtime(e.to_string()))?;
+            let n = args.ok_or_else(|| anyhow!("switch_vt needs a number"))?
+                .parse::<u8>().map_err(|e| anyhow!(e.to_string()))?;
             Ok(Action::SwitchVT(n))
         },
         "mark_area" => Ok(Action::MarkArea),
         "goto_area" => {
-            let n = args.ok_or_else(|| Error::runtime("goto_area needs a number"))?
-                .parse::<u32>().map_err(|_| Error::runtime("invalid area number"))?;
+            let n = args.ok_or_else(|| anyhow!("goto_area needs a number"))?
+                .parse::<u32>().map_err(|_| anyhow!("invalid area number"))?;
             Ok(Action::GoToArea(n))
         },
-        _ => Err(Error::runtime("action type not supported"))
+        "remove_area" => Ok(Action::RemoveArea),
+        "show_areas" => Ok(Action::ShowAreas),
+        _ => Err(anyhow!("action type not supported"))
     }
 }
 
@@ -145,6 +150,8 @@ impl AeroWM {
                 self.marking_area_start = None;
                 eprintln!("marking_area {} - drag to define", next);
             },
+            Action::RemoveArea => self.remove_current_area(),
+            Action::ShowAreas => {},
             Action::GoToArea(n) => self.goto_area(*n),
         }
     }
@@ -170,6 +177,11 @@ impl AeroWM {
             .map(|t| t.send_close()));
     }
 
+    fn remove_current_area(&mut self) {
+        if let Some(n) = self.current_area.take() {
+            self.areas.remove(&n);
+        }
+    }
     fn resize_focused(&mut self, x: i32, y: i32) {
         if let Some(fid) = self.focused_window_id {
             if let Some(cw) = self.windows.iter_mut().find(|cw| cw.id == fid) {
@@ -183,7 +195,7 @@ impl AeroWM {
     fn goto_area(&mut self, n: u32) {
         if self.areas.contains_key(&n) == false { return; }
         let area = self.areas[&n];
-        let (aw, ah) = (area.size.w, area.size.h);
+        let (_aw, ah) = (area.size.w, area.size.h);
         let (sw, sh) = {
             let o = self.space.outputs().next().unwrap();
             let g = self.space.output_geometry(o).unwrap(); 
@@ -197,6 +209,7 @@ impl AeroWM {
         self.viewport_target_x = cx - (sw / 2) as f64 / zoom_target;
         self.viewport_target_y = cy - (sh / 2) as f64 / zoom_target;
         self.begin_animation();
+        self.current_area = Some(n);
     }
 
     fn switch_view(&mut self) {

@@ -124,6 +124,8 @@ pub fn init_winit(
                             state.viewport_x,
                             state.viewport_y,
                             &state.config,
+                            &state.show_areas,
+                            &state.areas,
                             state.cursor_position,
                             &None,
                             &state.background_texture,

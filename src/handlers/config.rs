@@ -5,6 +5,7 @@ use mlua::{
 use anyhow::anyhow;
 use std::{cell::RefCell, collections::HashMap, fs::{create_dir_all, read_to_string, write}, rc::Rc};
 use dirs::config_dir;
+use hex_color::HexColor;
 
 use crate::{keybind::{Action, ParsedKeybind, parse_action, parse_keybind}};
 
@@ -12,10 +13,10 @@ use crate::{keybind::{Action, ParsedKeybind, parse_action, parse_keybind}};
 pub struct AeroWMConfig {
     pub main_modifier: String,
     pub gap: f64,
-    pub focused_border_color: [u8; 3],
-    pub unfocused_border_color: [u8; 3],
+    pub focused_border_color: [u8; 4],
+    pub unfocused_border_color: [u8; 4],
     pub background_type: String,
-    pub background_color: [u8; 3],
+    pub background_color: [u8; 4],
     pub background_image: Option<String>,
     pub background_shader: Option<String>,
     pub corner_rounding: f32,
@@ -27,6 +28,8 @@ pub struct AeroWMConfig {
     pub launch_rules: HashMap<String, LaunchRule>,
     pub default_apps: HashMap<String, String>,
     pub keybinds: Vec<(ParsedKeybind, Action)>,
+    pub area_border_thickness: i32,
+    pub area_colors: Vec<[u8; 4]>,
 }
 
 #[derive(Debug, Clone)]
@@ -35,6 +38,10 @@ pub struct LaunchRule {
     pub env: Option<HashMap<String, String>>
 }
 
+pub fn get_colors_rgba(key: &str) -> [u8; 4] {
+    let color = HexColor::parse_rgba(key).expect(format!("Failed to convert color {} to rgba", key).as_str());
+    [color.r, color.g, color.b, color.a]
+}
 
 pub fn read_config() -> Result<AeroWMConfig, Error> {
     let config_path = config_dir()
@@ -65,34 +72,21 @@ pub fn read_config() -> Result<AeroWMConfig, Error> {
     let main_modifier = table.get::<String>("main_modifier").map_err(|e| Error::runtime(e.to_string()))?;
     let gap = table.get::<f64>("gap").map_err(|e| Error::runtime(e.to_string()))?;
     
-    let focused_arr: Table = table.get("focused_border_color").map_err(|e| Error::runtime(e.to_string()))?;
-    let focused_border_color = [
-        focused_arr.get::<u8>(1).map_err(|e| Error::runtime(e.to_string()))?,
-        focused_arr.get::<u8>(2).map_err(|e| Error::runtime(e.to_string()))?,
-        focused_arr.get::<u8>(3).map_err(|e| Error::runtime(e.to_string()))?,
-    ];
+    let focused_border_color = get_colors_rgba(table.get::<String>("focused_border_color").map_err(|e| Error::runtime(e.to_string()))?.as_str());
 
-    let unfocused_arr: Table = table.get("unfocused_border_color").map_err(|e| Error::runtime(e.to_string()))?;
-    let unfocused_border_color = [
-        unfocused_arr.get::<u8>(1).map_err(|e| Error::runtime(e.to_string()))?,
-        unfocused_arr.get::<u8>(2).map_err(|e| Error::runtime(e.to_string()))?,
-        unfocused_arr.get::<u8>(3).map_err(|e| Error::runtime(e.to_string()))?,
-    ];
+    let unfocused_border_color = get_colors_rgba(table.get::<String>("unfocused_border_color").map_err(|e| Error::runtime(e.to_string()))?.as_str());
     let background_type = table.get::<String>("background_type").map_err(|e| Error::runtime(e.to_string()))?;
 
-    let background_color_arr: Table = table.get("background_color").map_err(|e| Error::runtime(e.to_string()))?;
-    let background_color = [
-        background_color_arr.get::<u8>(1).map_err(|e| Error::runtime(e.to_string()))?,
-        background_color_arr.get::<u8>(2).map_err(|e| Error::runtime(e.to_string()))?,
-        background_color_arr.get::<u8>(3).map_err(|e| Error::runtime(e.to_string()))?,
-    ];
+    let background_color= get_colors_rgba(table.get::<String>("background_color").map_err(|e| Error::runtime(e.to_string()))?.as_str());
     let background_image = table.get::<Option<String>>("background_image").map_err(|e| Error::runtime(e.to_string()))?;
     let background_shader = table.get::<Option<String>>("background_shader").map_err(|e| Error::runtime(e.to_string()))?;
+
     let corner_rounding = table.get::<f32>("corner_rounding").map_err(|e| Error::runtime(e.to_string()))?;
     let tile_distance = table.get::<i32>("tile_distance").map_err(|e| Error::runtime(e.to_string()))?;
     let border_width = table.get::<f32>("border_width").map_err(|e| Error::runtime(e.to_string()))?;
     let hover_to_focus = table.get::<bool>("hover_to_focus").map_err(|e| Error::runtime(e.to_string()))?;
     let client_side_decorations = table.get::<bool>("client_side_decorations").map_err(|e| Error::runtime(e.to_string()))?;
+    
     let cursor_size_arr: Table = table.get("cursor_size").map_err(|e| Error::runtime(e.to_string()))?;
     let cursor_size = [
         cursor_size_arr.get::<i32>(1).map_err(|e| Error::runtime(e.to_string()))?,
@@ -122,6 +116,12 @@ pub fn read_config() -> Result<AeroWMConfig, Error> {
         default_apps.insert(app_type, app_name);
     }
 
+    let area_colors_table: Table = table.get("area_colors").map_err(|e| Error::runtime(e.to_string()))?;
+    let mut area_colors = Vec::new();
+    for i in 0..area_colors_table.len().map_err(|_| Error::runtime("Empty area_colors, fill in at least one color value"))? {
+        area_colors.push(get_colors_rgba(area_colors_table.get::<String>(i).map_err(|e| Error::runtime(e.to_string()))?.as_str()));
+    }
+    let area_border_thickness = table.get::<i32>("area_border_thickness").map_err(|e| Error::runtime(e.to_string()))?;
 
     Ok(AeroWMConfig {
         main_modifier,
@@ -141,6 +141,8 @@ pub fn read_config() -> Result<AeroWMConfig, Error> {
         launch_rules,
         default_apps,
         keybinds,
+        area_colors,
+        area_border_thickness,
     })
 }
 
@@ -176,6 +178,12 @@ pub fn create_config() -> anyhow::Result<()>  {
         ["zen-browser"]= { args = "--no-remote", env = { ELECTRON_OZONE_PLATFORM_HINT = "auto", MOZ_ENABLE_WAYLAND="1" } },
         ["discord"] = { env = { ELECTRON_OZONE_PLATFORM_HINT = "wayland" } },
     },
+
+    areas = {
+      colors = { '#ff0000', '#00ff00', '#3399ff', '#ffcc00', ... },  -- cycled by id
+      border_thickness = 3,
+      show_combo = "super+a",
+    } 
 }
 
 -- Window management
