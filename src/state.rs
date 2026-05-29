@@ -169,7 +169,7 @@ pub struct AeroWM {
     // Animations
     pub(crate) viewport_anim_start_x: f64,
     pub(crate) viewport_anim_start_y: f64,
-    /// When Some, a 300 ms cubic ease-out animation is in progress.
+    /// When Some, a cubic ease-out animation is in progress, with the speed being from the settings.
     pub anim_start: Option<Instant>,
 
     // IDs
@@ -1077,8 +1077,7 @@ impl AeroWM {
     /// Lerp all canvas and viewport positions toward their targets. Call once per frame.
     pub fn tick_animation(&mut self) {
         let Some(start) = self.anim_start else { return };
-        const DURATION: f64 = 0.3;
-        let t = (start.elapsed().as_secs_f64() / DURATION).min(1.0);
+        let t = (start.elapsed().as_secs_f64() / self.config.animation_ease).min(1.0);
 
         // Cubic ease-out for smoother deceleration
         let ease_t = 1.0 - (1.0 - t).powi(3);

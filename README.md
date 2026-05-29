@@ -18,6 +18,7 @@ AeroWM organises windows in a tree structure. You can work in a focused **tiling
 - **Hover to focus** - optional focus-follows-mouse
 - **Background** - solid colour, image, or custom GLSL shader
 - **XWayland support** - run X11 applications alongside native Wayland clients
+- **Areas** - define named rectangular regions on the canvas and jump to them instantly
 
 ## Requirements
 
@@ -60,16 +61,24 @@ The config file lives at `~/.config/aerowm/aerowm.lua`. If it doesn't exist, Aer
 config = {
     main_modifier = "Ctrl",
     gap = 80.0,
-    focused_border_color = {64, 144, 194},
-    unfocused_border_color = {0, 0, 0},
+    focused_border_color = '#4090c2',
+    unfocused_border_color = '#000000',
     background_type = "color",
-    background_color = {26, 26, 26},
+    background_color = '#1a1a1a',
     corner_rounding = 32.0,
     tile_distance = 8,
     border_width = 2.0,
+    animation_ease = 0.3,
     hover_to_focus = true,
     client_side_decorations = false,
     cursor_size = {32, 32},
+
+    area_colors = {
+        '#5e81ac', '#88c0d0', '#8fbcbb', '#a3be8c', '#ebcb8b',
+        '#d08770', '#b48ead', '#81a1c1', '#4c566a', '#76c0a0',
+    },
+    area_border_thickness = 3,
+    always_show_areas = false,
 
     apps = {
         terminal = "kitty",
@@ -125,6 +134,10 @@ Modifiers: `Ctrl`, `Alt`, `Shift`, `Super`. Mouse buttons: `left`, `right`, `mid
 | `reset_view` | | Reset viewport and zoom |
 | `pan` | `"dx dy"` | Pan the canvas by dx, dy pixels |
 | `switch_vt` | vt number | Switch to a virtual terminal |
+| `mark_area` | | Start marking a new area by dragging on the canvas |
+| `goto_area` | area number | Animate the viewport to fill the given area |
+| `remove_area` | | Remove the currently active area |
+| `show_areas` | | Hold to show area outlines on the canvas |
 
 ## Planned / In Progress
 

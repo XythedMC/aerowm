@@ -8,13 +8,14 @@ use smithay::{
     }, reexports::{wayland_protocols::xdg::shell::server::xdg_toplevel::ResizeEdge, wayland_server::protocol::wl_surface::WlSurface}, utils::{Logical, Point, Rectangle, SERIAL_COUNTER},
 };
 
-use crate::{AeroWM, grabs::{PanCanvasGrab, ResizeSurfaceGrab}, keybind::{self, Action, Trigger}, state::{CanvasWindow, ModifierKey, ViewMode}};
+use crate::{AeroWM, grabs::{PanCanvasGrab, ResizeSurfaceGrab}, keybind::{Action, Trigger}, state::{CanvasWindow, ModifierKey, ViewMode}};
 impl AeroWM {
     fn window_edge_at(
         &self,
         cw: &CanvasWindow,
         px: i32, py: i32,
     ) -> ResizeEdge {
+        if self.focused_window_id.is_none() { return ResizeEdge::None }
         if cw.id != self.focused_window_id.unwrap() { return ResizeEdge::None }
         let wx = ((cw.canvas_x - self.viewport_x) * self.zoom) as i32;
         let wy = ((cw.canvas_y - self.viewport_y) * self.zoom) as i32;
@@ -43,6 +44,7 @@ impl AeroWM {
         &self,
         px: i32, py: i32,
     ) -> CursorImageStatus {
+        if self.focused_window_id.is_none() { return CursorImageStatus::default_named() }
         for window in self.windows.iter().rev() {
             if window.id != self.focused_window_id.unwrap() { return CursorImageStatus::default_named() }
             match self.window_edge_at(window, px, py) {
@@ -307,6 +309,8 @@ impl AeroWM {
 
                 const BTN_MIDDLE: u32 = 0x112;
                 const BTN_LEFT: u32 = 0x110;
+                const BTN_RIGHT: u32 = 0x111;
+
                 if ButtonState::Pressed == button_state && !pointer.is_grabbed()
                     && button == BTN_LEFT && self.marking_area.is_some() 
                 {
@@ -357,6 +361,65 @@ impl AeroWM {
                 if ButtonState::Released == button_state && self.active_drag {
                     self.active_drag = false;
                     self.dragged_window = None;
+                }
+
+                if ButtonState::Pressed == button_state && !pointer.is_grabbed()
+                    && button == BTN_RIGHT && main_mod && under.is_some()
+                {
+                    let px = pointer.current_location().x as i32;
+                    let py = pointer.current_location().y as i32;
+
+                    if let Some((surface, _pos)) = under {
+                        if let Some(cw) = self
+                            .windows
+                            .iter_mut()
+                            .find(|w| {
+                                w.window.toplevel().map(|t| t.wl_surface() == &surface).unwrap_or(false)
+                                    || w.window.x11_surface().and_then(|s| s.wl_surface()).map_or(false, |s| &s == &surface)
+                            }) 
+                        {
+                            let wx = ((cw.canvas_x - self.viewport_x) * self.zoom) as i32;
+                            let wy = ((cw.canvas_y - self.viewport_y) * self.zoom) as i32;
+                            let ww = (cw.base_width as f64 * self.zoom) as i32;
+                            let wh = (cw.base_height as f64 * self.zoom) as i32;
+                            
+                            let top_left_dist = (((px - wx).pow(2) + (py - wy).pow(2)) as f64).sqrt();
+                            let top_right_dist = (((px - wx - ww).pow(2) + (py - wy).pow(2)) as f64).sqrt();
+                            let bottom_left_dist = (((px - wx).pow(2) + (py - wy - wh).pow(2)) as f64).sqrt();
+                            let bottom_right_dist = (((px - wx - ww).pow(2) + (py - wy - wh).pow(2)) as f64).sqrt();
+
+                            let dists: [f64; 4] = [top_left_dist, top_right_dist, bottom_left_dist, bottom_right_dist];
+                            let minimum = dists.iter().fold(f64::INFINITY, |a, &b| a.min(b));
+
+                            let corner = if minimum == top_left_dist { ResizeEdge::TopLeft }
+                                else if minimum == top_right_dist { ResizeEdge::TopRight }
+                                else if minimum == bottom_left_dist { ResizeEdge::BottomLeft }
+                                else { ResizeEdge::BottomRight };
+
+                            cw.resize_edge = corner;
+                            cw.resize_initial_x = cw.canvas_x;
+                            cw.resize_initial_y = cw.canvas_y;
+                            cw.resize_initial_w = cw.base_width;
+                            cw.resize_initial_h = cw.base_height;
+
+                            let initial_width = cw.base_width;
+                            let initial_height = cw.base_height;
+
+                            let grab = ResizeSurfaceGrab {
+                                start_data: PointerGrabStartData {
+                                    focus: None,
+                                    button: BTN_RIGHT,
+                                    location: pointer.current_location(),
+                                },
+                                window_id: cw.id,
+                                initial_width,
+                                initial_height,
+                                grabbed_edge: corner,
+                                last_update: std::time::Instant::now(),
+                            };
+                            pointer.set_grab(self, grab, serial, Focus::Clear);
+                        }
+                    }
                 }
                     
                 if ButtonState::Pressed == button_state && !pointer.is_grabbed()

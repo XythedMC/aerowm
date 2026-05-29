@@ -2,10 +2,10 @@ use crate::{state::ClientState, AeroWM};
 use smithay::{
     backend::renderer::utils::on_commit_buffer_handler,
     delegate_compositor, delegate_shm,
-    reexports::wayland_server::{
+    reexports::{wayland_protocols::xdg::shell::server::xdg_toplevel::ResizeEdge, wayland_server::{
         Client,
         protocol::{wl_buffer, wl_surface::WlSurface},
-    },
+    }},
     wayland::{
         buffer::BufferHandler,
         compositor::{
@@ -52,7 +52,6 @@ impl CompositorHandler for AeroWM {
                         || w.window.x11_surface().and_then(|s| s.wl_surface()).map_or(false, |s| &s == surface)
                 }) 
             {
-                use smithay::reexports::wayland_protocols::xdg::shell::server::xdg_toplevel::ResizeEdge;
                 if cw.resize_edge != ResizeEdge::None {
                     let current_w = cw.window.geometry().size.w;
                     let current_h = cw.window.geometry().size.h;

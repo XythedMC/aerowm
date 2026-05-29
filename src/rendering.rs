@@ -338,7 +338,7 @@ pub fn build_render_elements(
         );
         overlays.push(AeroWMElement::Solid(elem));
     };
-    if *show_areas {
+    if *show_areas || config.always_show_areas {
         for (id, rect) in areas {
             let color = config.area_colors[(*id as usize - 1) % config.area_colors.len()];
             let sx = (rect.loc.x - viewport_x) * zoom;
@@ -349,7 +349,7 @@ pub fn build_render_elements(
             push_strip(Point::new(sx, sy), Size::new(sw as i32, t), color);
             push_strip(Point::new(sx, sy + sh - t as f64), Size::new(sw as i32, t), color);
             push_strip(Point::new(sx, sy), Size::new(t, sh  as i32), color);
-            push_strip(Point::new(sx + sw - t as f64, sy), Size::new(t, sw as i32), color);
+            push_strip(Point::new(sx + sw - t as f64, sy), Size::new(t, sh as i32), color);
         }
     }
 

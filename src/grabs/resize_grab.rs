@@ -30,6 +30,7 @@ impl PointerGrab<AeroWM> for ResizeSurfaceGrab {
         event: &MotionEvent,
     ) {
         handle.motion(data, None, event);
+        eprintln!("resizing window");
 
         let raw_delta = event.location - self.start_data.location;
         let zoom = data.zoom;
@@ -96,8 +97,7 @@ impl PointerGrab<AeroWM> for ResizeSurfaceGrab {
     ) {
         handle.button(data, event);
 
-        const BTN_LEFT: u32 = 0x110;
-        if !handle.current_pressed().contains(&BTN_LEFT) {
+        if !handle.current_pressed().contains(&self.start_data.button) {
             handle.unset_grab(self, data, event.serial, event.time, true);
         }
     }
