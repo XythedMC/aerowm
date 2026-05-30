@@ -5,7 +5,7 @@ use smithay::{
             Color32F, element::{AsRenderElements, Kind, solid::{SolidColorBuffer, SolidColorRenderElement}, surface::WaylandSurfaceRenderElement, texture::{TextureBuffer, TextureRenderElement}, utils::RescaleRenderElement}, gles::{
                 GlesPixelProgram, GlesRenderer, GlesTexture, Uniform, UniformName, UniformType, element::PixelShaderElement
             }
-        }, desktop::{Space, Window}, utils::{Logical, Point, Rectangle, Scale, Size, Transform}
+        }, desktop::{Space, Window}, utils::{Logical, Physical, Point, Rectangle, Scale, Size, Transform}
 };
 
 use crate::{handlers::config::AeroWMConfig, state::{CanvasWindow, AeroWMElement, ViewMode}};
@@ -287,6 +287,22 @@ pub fn build_render_elements(
         overlays.push(AeroWMElement::Texture(draw_cursor(cursor_position, cursor_texture.clone().expect("cursor image undefined"), renderer, scale, config)));
     }
 
+    // Render layer surfaces (wlr-layer-shell: background/bottom/top/overlay).
+    {
+        let layer_map = smithay::desktop::layer_map_for_output(&output);
+        for layer in layer_map.layers() {
+            let loc = layer_map.layer_geometry(layer).unwrap_or_default().loc;
+            overlays.extend(
+                layer.render_elements::<WaylandSurfaceRenderElement<GlesRenderer>>(
+                    renderer,
+                    loc.to_physical_precise_round(scale),
+                    Scale::from(scale),
+                    1.0,
+                ).into_iter().map(AeroWMElement::Surface)
+            );
+        }
+    }
+
     let mut sorted_windows: Vec<&CanvasWindow> = windows.iter().collect();
     sorted_windows.sort_by_key(|cw| std::cmp::Reverse(cw.z_index));
 
@@ -350,22 +366,6 @@ pub fn build_render_elements(
             push_strip(Point::new(sx, sy + sh - t as f64), Size::new(sw as i32, t), color);
             push_strip(Point::new(sx, sy), Size::new(t, sh  as i32), color);
             push_strip(Point::new(sx + sw - t as f64, sy), Size::new(t, sh as i32), color);
-        }
-    }
-
-    // Render layer surfaces (wlr-layer-shell: background/bottom/top/overlay).
-    {
-        let layer_map = smithay::desktop::layer_map_for_output(&output);
-        for layer in layer_map.layers() {
-            let loc = layer_map.layer_geometry(layer).unwrap_or_default().loc;
-            overlays.extend(
-                layer.render_elements::<WaylandSurfaceRenderElement<GlesRenderer>>(
-                    renderer,
-                    loc.to_physical_precise_round(scale),
-                    Scale::from(scale),
-                    1.0,
-                ).into_iter().map(AeroWMElement::Surface)
-            );
         }
     }
 

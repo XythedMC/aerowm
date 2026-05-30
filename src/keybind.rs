@@ -170,9 +170,10 @@ impl AeroWM {
         }
     }
     fn close(&self) {
+        if self.focused_window_id.is_none() { return; }
         self.windows
             .iter()
-            .find(|cw| cw.id == self.focused_window_id.expect("No focused window to close"))
+            .find(|cw| cw.id == self.focused_window_id.unwrap())
             .and_then(|cw| cw.window.toplevel()
             .map(|t| t.send_close()));
     }

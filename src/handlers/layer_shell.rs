@@ -1,7 +1,5 @@
 use smithay::{
-    delegate_layer_shell, desktop::{WindowSurfaceType, layer_map_for_output}, 
-    reexports::wayland_server::protocol::wl_output::WlOutput, 
-    wayland::shell::wlr_layer::{Layer, LayerSurface, WlrLayerShellHandler},
+    delegate_layer_shell, desktop::{WindowSurfaceType, layer_map_for_output}, reexports::wayland_server::protocol::{wl_output::WlOutput, wl_surface::WlSurface}, utils::SERIAL_COUNTER, wayland::shell::wlr_layer::{KeyboardInteractivity, Layer, LayerSurface, LayerSurfaceConfigure, WlrLayerShellHandler}
 };
 use crate::AeroWM;
 
@@ -34,6 +32,21 @@ impl WlrLayerShellHandler for AeroWM {
         layer_map_for_output(&output).map_layer(&layer_surface).unwrap();
         surface.send_configure();
         self.layer_surfaces.push(layer_surface);
+    }
+
+    fn ack_configure(&mut self, 
+        surface: WlSurface, 
+        configure: LayerSurfaceConfigure
+    ) {
+        eprintln!("ack_configure called");
+        let layer_surface = self.layer_surfaces.iter().find(|s| s.wl_surface() == &surface).unwrap();
+        eprintln!("{:?}", layer_surface.cached_state().keyboard_interactivity);
+        if layer_surface.cached_state().keyboard_interactivity != KeyboardInteractivity::None {
+            let keyboard = self.seat.get_keyboard().expect("Keyboard not found while trying to add it");
+            let serial = SERIAL_COUNTER.next_serial();
+            keyboard.set_focus(self, Some(layer_surface.wl_surface().clone()), serial);
+            eprintln!("setting keyboard focus");
+        }
     }
 }
 

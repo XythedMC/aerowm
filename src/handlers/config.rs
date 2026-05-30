@@ -26,7 +26,10 @@ pub struct AeroWMConfig {
     pub tile_distance: i32,
     pub border_width: f32,
     pub hover_to_focus: bool,
+
     pub client_side_decorations: bool,
+    pub layer_shell_zoom: bool,
+
     pub animation_ease: f64,
 
     pub cursor_size: [i32; 2],
@@ -93,7 +96,10 @@ pub fn read_config() -> Result<AeroWMConfig, Error> {
     let tile_distance = table.get::<i32>("tile_distance").map_err(|e| Error::runtime(e.to_string()))?;
     let border_width = table.get::<f32>("border_width").map_err(|e| Error::runtime(e.to_string()))?;
     let hover_to_focus = table.get::<bool>("hover_to_focus").map_err(|e| Error::runtime(e.to_string()))?;
+    
     let client_side_decorations = table.get::<bool>("client_side_decorations").map_err(|e| Error::runtime(e.to_string()))?;
+    let layer_shell_zoom = table.get::<bool>("layer_shell_zoom").map_err(|e| Error::runtime(e.to_string()))?;
+    
     let animation_ease = table.get::<f64>("animation_ease").map_err(|e| Error::runtime(e.to_string()))?;
 
     let cursor_size_arr: Table = table.get("cursor_size").map_err(|e| Error::runtime(e.to_string()))?;
@@ -147,6 +153,7 @@ pub fn read_config() -> Result<AeroWMConfig, Error> {
         border_width,
         hover_to_focus,
         client_side_decorations,
+        layer_shell_zoom,
         animation_ease,
         cursor_size,
         launch_rules,
@@ -180,12 +187,14 @@ pub fn create_config() -> anyhow::Result<()>  {
     animation_ease = 0.3,
     hover_to_focus = true,
     client_side_decorations = false,
+    layer_shell_zoom = true,
     cursor_size = {32, 32},
 
     apps = {
         terminal = "kitty",
         browser  = "zen-browser",
         files = "nautilus",
+        launcher = "rofi -show drun"
     },
 
     launch_rules = {
@@ -232,6 +241,7 @@ bind("Ctrl+9", "goto_area", "9")
 bind("Ctrl+Return",      "exec", "kitty")
 bind("Ctrl+W",           "exec", "zen-browser")
 bind("Ctrl+E",           "exec", "nautilus")
+bind("Ctrl+Tab", "exec", "launcher")
 
 -- Tree navigation
 bind("Ctrl+P",           "parent")

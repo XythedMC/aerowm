@@ -5,7 +5,7 @@ use smithay::{
     }, desktop::WindowSurfaceType, input::{
         keyboard::FilterResult,
         pointer::{AxisFrame, ButtonEvent, CursorIcon, CursorImageStatus, Focus, GrabStartData as PointerGrabStartData, MotionEvent},
-    }, reexports::{wayland_protocols::xdg::shell::server::xdg_toplevel::ResizeEdge, wayland_server::protocol::wl_surface::WlSurface}, utils::{Logical, Point, Rectangle, SERIAL_COUNTER},
+    }, reexports::{wayland_protocols::xdg::shell::server::xdg_toplevel::ResizeEdge, wayland_server::protocol::wl_surface::WlSurface}, utils::{Logical, Point, Rectangle, SERIAL_COUNTER}, wayland::shell::wlr_layer::KeyboardInteractivity,
 };
 
 use crate::{AeroWM, grabs::{PanCanvasGrab, ResizeSurfaceGrab}, keybind::{Action, Trigger}, state::{CanvasWindow, ModifierKey, ViewMode}};
@@ -75,7 +75,6 @@ impl AeroWM {
     pub fn process_input_event<I: InputBackend>(&mut self, event: InputEvent<I>) { 
         match event {
             InputEvent::Keyboard { event, .. } => {
-    
                 let serial = SERIAL_COUNTER.next_serial();
                 let time = Event::time_msec(&event);
                 let key_state = event.state();
@@ -232,9 +231,16 @@ impl AeroWM {
                         .map_or(false, |t| t.wl_surface() == &under.0)
                 }) {
                     let window_id = window.id;
-                    if self.config.hover_to_focus {
-                        keyboard.set_focus(self, Some(under.0.clone()), serial);
-                        self.focused_window_id = Some(window_id);
+                    if self.layer_surfaces
+                        .iter()
+                        .find(|surface|
+                            surface.cached_state().keyboard_interactivity == KeyboardInteractivity::Exclusive
+                        ).is_none()
+                    {
+                        if self.config.hover_to_focus {
+                            keyboard.set_focus(self, Some(under.0.clone()), serial);
+                            self.focused_window_id = Some(window_id);
+                        }
                     }
                 }
             }
@@ -479,17 +485,24 @@ impl AeroWM {
                             pointer.set_grab(self, grab, serial, Focus::Clear);
                         } else {
                             // cursor is over window body — focus it
-                            let z = self.z_counter;
-                            self.z_counter += 1;
-                            let cw = self.windows.iter_mut().find(|w| w.id == cw_id).unwrap();
-                            cw.z_index = z;
-                            let wl_surf = cw.window.toplevel().map(|t| t.wl_surface().clone())
-                                .or_else(|| cw.window.x11_surface().and_then(|s| s.wl_surface()))
-                                .unwrap();
-                            let win_ref = cw.window.clone();
-                            self.space.raise_element(&win_ref, true);
-                            keyboard.set_focus(self, Some(wl_surf.clone()), serial);
-                            self.focused_window_id = Some(cw_id);
+                            if self.layer_surfaces
+                                .iter()
+                                .find(|surface| 
+                                    surface.cached_state().keyboard_interactivity == KeyboardInteractivity::Exclusive
+                                ).is_none() 
+                            {
+                                let z = self.z_counter;
+                                self.z_counter += 1;
+                                let cw = self.windows.iter_mut().find(|w| w.id == cw_id).unwrap();
+                                cw.z_index = z;
+                                let wl_surf = cw.window.toplevel().map(|t| t.wl_surface().clone())
+                                    .or_else(|| cw.window.x11_surface().and_then(|s| s.wl_surface()))
+                                    .unwrap();
+                                let win_ref = cw.window.clone();
+                                self.space.raise_element(&win_ref, true);
+                                keyboard.set_focus(self, Some(wl_surf.clone()), serial);
+                                self.focused_window_id = Some(cw_id);
+                            }
                         }
                     } else {
                         // cursor over empty canvas — deselect
@@ -497,8 +510,15 @@ impl AeroWM {
                             w.set_activated(false);
                             if let Some(t) = w.toplevel() { t.send_pending_configure(); }
                         });
-                        keyboard.set_focus(self, Option::<WlSurface>::None, serial);
-                        self.focused_window_id = None;
+                        if self.layer_surfaces
+                            .iter()
+                            .find(|surface| 
+                                surface.cached_state().keyboard_interactivity == KeyboardInteractivity::Exclusive
+                            ).is_none() 
+                        {
+                            keyboard.set_focus(self, Option::<WlSurface>::None, serial);
+                            self.focused_window_id = None;
+                        }
                     }            
                 } else if ButtonState::Pressed == button_state && !pointer.is_grabbed() && !self.active_drag {
                     let canvas_cx = self.cursor_position.x / self.zoom + self.viewport_x;
@@ -520,17 +540,23 @@ impl AeroWM {
                             .or_else(|| cw.window.x11_surface().and_then(|s| s.wl_surface()))
                             .unwrap();
                         self.space.raise_element(&win_ref, true);
-                        keyboard.set_focus(self, Some(wl_surf.clone()), serial);
-
-                        self.focused_window_id = self
-                            .windows
+                        if self.layer_surfaces
                             .iter()
-                            .find(|cw| {
-                                cw.window.toplevel().map_or(false, |t| t.wl_surface() == &wl_surf)
-                                || cw.window.x11_surface().and_then(|s| s.wl_surface()).map_or(false, |s| s == wl_surf)
-                            })
-                            .map(|cw| cw.id);
+                            .find(|surface| 
+                                surface.cached_state().keyboard_interactivity == KeyboardInteractivity::Exclusive
+                            ).is_none() 
+                        {
+                            keyboard.set_focus(self, Some(wl_surf.clone()), serial);
 
+                            self.focused_window_id = self
+                                .windows
+                                .iter()
+                                .find(|cw| {
+                                    cw.window.toplevel().map_or(false, |t| t.wl_surface() == &wl_surf)
+                                    || cw.window.x11_surface().and_then(|s| s.wl_surface()).map_or(false, |s| s == wl_surf)
+                                })
+                                .map(|cw| cw.id);
+                        }
                         match self.view_mode {
                             ViewMode::Tiling => {
                                 self.apply_layout();
@@ -545,8 +571,15 @@ impl AeroWM {
                             window.set_activated(false);
                             if let Some(t) = window.toplevel() { t.send_pending_configure(); }
                         });
-                        keyboard.set_focus(self, Option::<WlSurface>::None, serial);
-                        self.focused_window_id = None;
+                        if self.layer_surfaces
+                            .iter()
+                            .find(|surface| 
+                                surface.cached_state().keyboard_interactivity == KeyboardInteractivity::Exclusive
+                            ).is_none() 
+                        {
+                            keyboard.set_focus(self, Option::<WlSurface>::None, serial);
+                            self.focused_window_id = None;
+                        }
                         if self.view_mode == ViewMode::Tiling {
                             self.apply_layout();
                         }

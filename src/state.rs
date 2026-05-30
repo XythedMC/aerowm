@@ -202,7 +202,7 @@ pub struct AeroWM {
     pub cursor_texture: Option<GlesTexture>,
 
     // Dragging
-    pub active_drag: bool, 
+    pub active_drag: bool,
     pub dragged_window: Option<(u32, Point<f64, Logical>)>,
 
     pub layer_surfaces: Vec<LayerSurface>,
@@ -994,7 +994,10 @@ impl AeroWM {
         let socket_str = self.socket_name.to_string_lossy().to_string();
 
         let rule = self.config.launch_rules.get(name);
-        let mut cmd = Command::new(name);
+        let mut parts = name.split_whitespace();
+        let bin = parts.next().unwrap_or(name);
+        let mut cmd = Command::new(bin);
+        cmd.args(parts);
         if let Some(r) = rule {
             if let Some(args) = &r.args {
                 cmd.args(args.split_whitespace());
