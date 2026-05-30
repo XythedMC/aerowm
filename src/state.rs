@@ -1,5 +1,6 @@
 use std::{collections::HashMap, env::set_var, ffi::OsString, iter::empty, process::{Command, Stdio}, sync::Arc, time::{Duration, Instant}};
 
+use mlua::Error;
 use smithay::{
     backend::{
         allocator::{Fourcc, dmabuf::Dmabuf, gbm::{GbmAllocator, GbmDevice}}, 
@@ -8,7 +9,7 @@ use smithay::{
             Color32F, 
             ImportMem, 
             element::{solid::SolidColorRenderElement, surface::WaylandSurfaceRenderElement, texture::TextureRenderElement, utils::RescaleRenderElement}, 
-            gles::{GlesPixelProgram, GlesRenderer, GlesTexture, UniformName, UniformType, element::PixelShaderElement}
+            gles::{GlesPixelProgram, GlesRenderer, GlesTexture, UniformName, UniformType, element::PixelShaderElement, ffi}
         }, 
         session::libseat::LibSeatSession
     }, 
@@ -43,7 +44,7 @@ use smithay::{
 
 use tokio::sync::broadcast::Sender;
 use xcursor::{CursorTheme, parser::parse_xcursor};
-use crate::{handlers::config::AeroWMConfig, keybind::ParsedKeybind, rendering::build_render_elements};
+use crate::{handlers::config::{AeroWMConfig, read_config}, keybind::ParsedKeybind, rendering::build_render_elements};
 use image::ImageReader;
 
 smithay::backend::renderer::element::render_elements! {
@@ -937,22 +938,14 @@ impl AeroWM {
                     let _ = renderer.with_context(|gl| unsafe {
                         gl.ReadPixels(
                             0, 0, sw, sh,
-                            smithay::backend::renderer::gles::ffi::RGBA,
-                            smithay::backend::renderer::gles::ffi::UNSIGNED_BYTE,
+                            ffi::RGBA,
+                            ffi::UNSIGNED_BYTE,
                             pixels.as_mut_ptr() as *mut _,
                         );
                     });
-                    // Flip vertically — GL origin is bottom-left, image expects top-left
-                    let row_bytes = (sw * 4) as usize;
-                    let mut flipped = vec![0u8; pixels.len()];
-                    for y in 0..sh as usize {
-                        let src_y = sh as usize - 1 - y;
-                        flipped[y * row_bytes..(y + 1) * row_bytes]
-                            .copy_from_slice(&pixels[src_y * row_bytes..(src_y + 1) * row_bytes]);
-                    }
                     match image::save_buffer(
                         "/tmp/aerowm-last.png",
-                        &flipped,
+                        &pixels,
                         sw as u32,
                         sh as u32,
                         image::ColorType::Rgba8,
@@ -1018,6 +1011,30 @@ impl AeroWM {
             Err(e) => tracing::error!("Failed to spawn kitty: {}", e),
         }
         eprintln!("launch_app: DISPLAY=:{}", self.x11_display_number.unwrap_or(0));
+    }
+
+    // -- Config -----------------------------------
+    pub fn reload_config(&mut self) -> Result<(), Error> {
+        let config = match read_config() {
+            Ok(config) => config,
+            Err(e) => return Err(e),
+        };
+        self.config = config.clone();
+        self.main_modifier = match config.main_modifier.as_str() {
+            "Ctrl" => ModifierKey::Ctrl,
+            "Super" => ModifierKey::Super,
+            "Shift" => ModifierKey::Shift,
+            "Alt" => ModifierKey::Alt,
+            _ => return Err(Error::runtime("Main modifier from config file isnt allowed, options are: Ctrl, Super, Shift and Alt")),
+        };
+
+        self.background_type = match config.background_type.as_str() {
+            "color" => BackgroundType::Color,
+            "image" => BackgroundType::Image,
+            "shader" => BackgroundType::Shader,
+            _ => return Err(Error::runtime("Selected background type is not allowed! Only options are 'color', 'image' and 'shader'")),
+        };
+        Ok(())
     }
     // -- Canvas / viewport ------------------------------
 

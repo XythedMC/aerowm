@@ -154,7 +154,7 @@ Modifiers: `Ctrl`, `Alt`, `Shift`, `Super`. Mouse buttons: `left`, `right`, `mid
 - **Clipboard manager support** - wlr-data-control protocol
 - **Idle/lock screen** - ext-idle-notify and ext-session-lock support
 - **Named workspaces** - map subtrees to named workspaces with fast switching
-- **Config hot-reload** - reload the Lua config without restarting
+- ~~**Config hot-reload** - reload the Lua config without restarting~~
 - **Multi-language input** - IME support for non-Latin scripts
 
 ## License

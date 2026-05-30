@@ -7,9 +7,18 @@ mod winit;
 mod drm;
 mod rendering;
 mod keybind;
+
+use dirs::config_dir;
+use notify::{RecursiveMode, Watcher};
 pub use state::AeroWM;
 
-use smithay::reexports::{calloop::EventLoop, wayland_server::Display};
+use std::{env::set_var, path::PathBuf, process::Command, thread};
+
+use smithay::reexports::{
+    calloop::{EventLoop, channel::{Event, channel}}, 
+    wayland_server::Display
+};
+use tokio::{runtime::Runtime, sync::broadcast};
 use tracing_subscriber::EnvFilter;
 use crate::handlers::config::{create_config, read_config};
 
@@ -45,24 +54,44 @@ fn main() -> anyhow::Result<()>{
 
     let mut state = AeroWM::new(&mut event_loop, display, config);
 
-    let (cmd_tx, cmd_rx) = smithay::reexports::calloop::channel::channel::<ipc::InternalCommand>();
-    let (event_tx, event_rx) = tokio::sync::broadcast::channel(16);
+    let (cmd_tx, cmd_rx) = channel::<ipc::InternalCommand>();
+    let (config_tx, config_rx) = channel::<()>();
+    let (event_tx, event_rx) = broadcast::channel(16);
 
     state.event_tx = Some(event_tx);
 
-    let socket_path = std::path::PathBuf::from("/tmp/AeroWM.sock");
-    std::thread::spawn(move || {
-        let rt = tokio::runtime::Runtime::new().unwrap();
+    let socket_path = PathBuf::from("/tmp/AeroWM.sock");
+    thread::spawn(move || {
+        let rt = Runtime::new().unwrap();
         rt.block_on(async {
             ipc::run_ipc_server(cmd_tx, event_rx, &socket_path).await;
         });
     });
 
+    let mut watcher = notify::recommended_watcher( move |res: notify::Result<notify::Event>| {
+        if let Ok(event) = res {
+            if event.kind.is_modify() {
+                config_tx.send(()).ok();
+            }
+        }
+    }).unwrap();
+    let config_path = config_dir()
+        .expect("Config directory ($HOME/.config) doesn't exist")
+        .join("aerowm")
+        .join("aerowm.lua");
+    watcher.watch(&config_path.to_path_buf(), RecursiveMode::NonRecursive).unwrap();
+    std::mem::forget(watcher);
+
+    event_loop.handle().insert_source(config_rx, |_event, _, state| {
+        state.reload_config().expect("Failed to reload config, there is a problem with the config file");
+    }).unwrap();
+
     event_loop.handle().insert_source(cmd_rx, |event, _, state| {
-        if let smithay::reexports::calloop::channel::Event::Msg(cmd) = event {
+        if let Event::Msg(cmd) = event {
             state.handle_ipc_cmd(cmd);
         }
     }).unwrap();
+
 
     if std::env::var("WAYLAND_DISPLAY").is_ok() || std::env::var("DISPLAY").is_ok() {
         winit::init_winit(&mut event_loop, &mut state).expect("Failed to initialize winit backend");
@@ -73,23 +102,20 @@ fn main() -> anyhow::Result<()>{
     let socket_str = state.socket_name.to_string_lossy().into_owned();
 
     // Propagate into our own environment so child processes inherit the right display.
-    std::env::set_var("WAYLAND_DISPLAY",            &state.socket_name);
-    std::env::set_var("MOZ_ENABLE_WAYLAND",         "1");  // Firefox / Zen
-    std::env::set_var("GDK_BACKEND",                "wayland");
-    std::env::set_var("QT_QPA_PLATFORM",            "wayland");
-    std::env::set_var("ELECTRON_OZONE_PLATFORM_HINT", "wayland"); // Electron (Spotify, Claude …)
-    std::env::set_var("CLUTTER_BACKEND",            "wayland");
-    std::env::set_var("SDL_VIDEODRIVER",            "wayland");
+    set_var("WAYLAND_DISPLAY",            &state.socket_name);
+    set_var("MOZ_ENABLE_WAYLAND",         "1");  // Firefox / Zen
+    set_var("GDK_BACKEND",                "wayland");
+    set_var("QT_QPA_PLATFORM",            "wayland");
+    set_var("ELECTRON_OZONE_PLATFORM_HINT", "wayland"); // Electron (Spotify, Claude …)
+    set_var("CLUTTER_BACKEND",            "wayland");
+    set_var("SDL_VIDEODRIVER",            "wayland");
 
     eprintln!("AeroWM: WAYLAND_DISPLAY={socket_str}");
-    eprintln!("AeroWM: to run apps in this session:");
-    eprintln!("  WAYLAND_DISPLAY={socket_str} <app>");
-    eprintln!("  or start with:  AeroWM -e <terminal>");
 
     // Spawn the startup command (e.g. a terminal) with all Wayland env vars baked in.
     if let Some(cmd) = startup_cmd {
         let (prog, argv) = cmd.split_first().unwrap();
-        match std::process::Command::new(prog).args(argv).spawn()
+        match Command::new(prog).args(argv).spawn()
         {
             Ok(_)  => eprintln!("AeroWM: spawned: {}", cmd.join(" ")),
             Err(e) => eprintln!("AeroWM: failed to spawn '{}': {e}", cmd.join(" ")),

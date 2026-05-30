@@ -1,4 +1,6 @@
 use serde::{Deserialize, Serialize};
+use smithay::reexports::calloop::channel::Sender;
+use tokio::sync::broadcast::Receiver;
 use std::path::Path;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::UnixListener;
@@ -68,8 +70,8 @@ pub struct TreeResponse {
 }
 
 pub async fn run_ipc_server(
-    cmd_tx: smithay::reexports::calloop::channel::Sender<InternalCommand>,
-    event_rx: broadcast::Receiver<IpcEvent>,
+    cmd_tx: Sender<InternalCommand>,
+    event_rx: Receiver<IpcEvent>,
     socket_path: &Path,
 ) {
     if socket_path.exists() {
