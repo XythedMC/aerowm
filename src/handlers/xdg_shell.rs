@@ -86,7 +86,7 @@ impl XdgShellHandler for AeroWM {
             pre_fullscreen_width: 0,
             pre_fullscreen_height: 0,
             z_index,
-            needs_center: true,
+            needs_center: self.config.center_on_launch,
         });
 
         self.emit_event(crate::ipc::IpcEvent::WindowOpened {
