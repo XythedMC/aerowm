@@ -41,8 +41,8 @@ impl XdgShellHandler for AeroWM {
             (size.w, size.h)
         });
 
-        let canvas_x = self.cursor_position.x / self.zoom + self.viewport_target_x;
-        let canvas_y = self.cursor_position.y / self.zoom + self.viewport_target_y;
+        let canvas_x = self.cursor_position.x / self.zoom + self.viewport_target_x - initial_w as f64 / 2.0;
+        let canvas_y = self.cursor_position.y / self.zoom + self.viewport_target_y - initial_h as f64 / 2.0;
 
         let window = Window::new_wayland_window(surface);
         let screen_x = self.cursor_position.x as i32;
@@ -86,6 +86,7 @@ impl XdgShellHandler for AeroWM {
             pre_fullscreen_width: 0,
             pre_fullscreen_height: 0,
             z_index,
+            needs_center: true,
         });
 
         self.emit_event(crate::ipc::IpcEvent::WindowOpened {

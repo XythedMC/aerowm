@@ -26,6 +26,7 @@ pub struct AeroWMConfig {
     pub tile_distance: i32,
     pub border_width: f32,
     pub hover_to_focus: bool,
+    pub center_on_launch: bool,
 
     pub client_side_decorations: bool,
 
@@ -95,7 +96,8 @@ pub fn read_config() -> Result<AeroWMConfig, Error> {
     let tile_distance = table.get::<i32>("tile_distance").map_err(|e| Error::runtime(e.to_string()))?;
     let border_width = table.get::<f32>("border_width").map_err(|e| Error::runtime(e.to_string()))?;
     let hover_to_focus = table.get::<bool>("hover_to_focus").map_err(|e| Error::runtime(e.to_string()))?;
-    
+    let center_on_launch = table.get::<bool>("center_on_launch").map_err(|e| Error::runtime(e.to_string()))?;
+
     let client_side_decorations = table.get::<bool>("client_side_decorations").map_err(|e| Error::runtime(e.to_string()))?;
     
     let animation_ease = table.get::<f64>("animation_ease").map_err(|e| Error::runtime(e.to_string()))?;
@@ -150,6 +152,7 @@ pub fn read_config() -> Result<AeroWMConfig, Error> {
         tile_distance,
         border_width,
         hover_to_focus,
+        center_on_launch,
         client_side_decorations,
         animation_ease,
         cursor_size,
@@ -183,6 +186,7 @@ pub fn create_config() -> anyhow::Result<()>  {
     launch_at_center = true,
     animation_ease = 0.3,
     hover_to_focus = true,
+    center_on_launch = true,
     client_side_decorations = false,
     cursor_size = {32, 32},
 

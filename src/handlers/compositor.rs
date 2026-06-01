@@ -49,6 +49,12 @@ impl CompositorHandler for AeroWM {
                         || w.window.x11_surface().and_then(|s| s.wl_surface()).map_or(false, |s| &s == surface)
                 }) 
             {
+                if cw.needs_center {
+                    cw.canvas_x -= cw.window.geometry().size.w as f64 / 2.0;
+                    cw.canvas_y -= cw.window.geometry().size.h as f64 / 2.0;
+                    cw.needs_center = false;
+                    position_changed = true;
+                }
                 if cw.resize_edge != ResizeEdge::None {
                     let current_w = cw.window.geometry().size.w;
                     let current_h = cw.window.geometry().size.h;

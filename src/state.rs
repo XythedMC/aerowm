@@ -140,6 +140,7 @@ pub struct CanvasWindow {
     pub pre_fullscreen_height: i32,
 
     pub z_index: u32,
+    pub needs_center: bool,
 }
 
 pub struct AeroWM {
