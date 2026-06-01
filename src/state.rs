@@ -1039,8 +1039,8 @@ impl AeroWM {
         };
         Ok(())
     }
+    
     // -- Canvas / viewport ------------------------------
-
     pub fn viewport_center(&self) -> (f64, f64) {
         let (w, h) = self
             .space
@@ -1209,11 +1209,28 @@ impl AeroWM {
         &self,
         pos: Point<f64, Logical>,
     ) -> Option<(WlSurface, Point<f64, Logical>)> {
-        self.space.element_under(pos).and_then(|(window, location)| {
+        let element = self.space.element_under(pos).and_then(|(window, location)| {
             window
                 .surface_under(pos - location.to_f64(), WindowSurfaceType::ALL)
                 .map(|(s, p)| (s, (p + location).to_f64()))
-        })
+        });
+        if element.is_none() {
+            let layer_map = layer_map_for_output(self.space.outputs().next().unwrap());
+            for layer in layer_map.layers() {
+                let geo = layer_map.layer_geometry(layer).unwrap_or_default();
+
+                let local: Point<f64, Logical> = Point::new(
+                    pos.x - geo.loc.to_f64().x, 
+                    pos.y - geo.loc.to_f64().y
+                );
+                if let Some((surf, p)) = layer.surface_under(local, WindowSurfaceType::ALL) {
+                    return Some((surf, p.to_f64() + geo.loc.to_f64()));
+                } else if local.x >= 0.0 && local.y >= 0.0 {
+                    return Some((layer.wl_surface().clone(), geo.loc.to_f64()))
+                }
+            }
+        } 
+        element
     }
 
     // - IPC -------------------------------─

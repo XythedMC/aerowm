@@ -4,7 +4,7 @@ use tokio::sync::broadcast::Receiver;
 use std::path::Path;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::UnixListener;
-use tokio::sync::{broadcast, oneshot};
+use tokio::sync::oneshot;
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(tag = "cmd")]

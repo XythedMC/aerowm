@@ -5,7 +5,7 @@ use smithay::{
             Color32F, element::{AsRenderElements, Kind, solid::{SolidColorBuffer, SolidColorRenderElement}, surface::WaylandSurfaceRenderElement, texture::{TextureBuffer, TextureRenderElement}, utils::RescaleRenderElement}, gles::{
                 GlesPixelProgram, GlesRenderer, GlesTexture, Uniform, UniformName, UniformType, element::PixelShaderElement
             }
-        }, desktop::{Space, Window}, utils::{Logical, Physical, Point, Rectangle, Scale, Size, Transform}
+        }, desktop::{Space, Window}, utils::{Logical, Point, Rectangle, Scale, Size, Transform}
 };
 
 use crate::{handlers::config::AeroWMConfig, state::{CanvasWindow, AeroWMElement, ViewMode}};
@@ -380,7 +380,6 @@ pub fn build_render_elements(
 
     match config.background_type.as_str() {
         "image" => {
-            eprintln!("drawing image background");
             if let Some(tex) = background_texture {
                 let (sw, sh) = {
                     let o = space.outputs().next().unwrap();
@@ -409,7 +408,6 @@ pub fn build_render_elements(
                     for i in i_start..=i_end {
                         let screen_x = (i as f64 * tile_w as f64 - viewport_x) * zoom;
                         let screen_y = (j as f64 * tile_h as f64 - viewport_y) * zoom;
-                        eprintln!("scale: {} bg_scale: {} sw: {} sh: {}", scale, bg_scale, sw, sh);
                         overlays.push(AeroWMElement::Texture(
                             TextureRenderElement::from_texture_buffer(
                                 Point::from((screen_x, screen_y)).to_physical_precise_round(scale),

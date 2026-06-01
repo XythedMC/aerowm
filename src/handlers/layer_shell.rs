@@ -36,16 +36,14 @@ impl WlrLayerShellHandler for AeroWM {
 
     fn ack_configure(&mut self, 
         surface: WlSurface, 
-        configure: LayerSurfaceConfigure
+        _configure: LayerSurfaceConfigure
     ) {
-        eprintln!("ack_configure called");
+        layer_map_for_output(&self.space.outputs().next().unwrap()).arrange();
         let layer_surface = self.layer_surfaces.iter().find(|s| s.wl_surface() == &surface).unwrap();
-        eprintln!("{:?}", layer_surface.cached_state().keyboard_interactivity);
         if layer_surface.cached_state().keyboard_interactivity != KeyboardInteractivity::None {
             let keyboard = self.seat.get_keyboard().expect("Keyboard not found while trying to add it");
             let serial = SERIAL_COUNTER.next_serial();
             keyboard.set_focus(self, Some(layer_surface.wl_surface().clone()), serial);
-            eprintln!("setting keyboard focus");
         }
     }
 }

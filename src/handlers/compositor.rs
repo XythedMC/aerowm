@@ -1,18 +1,15 @@
 use crate::{state::ClientState, AeroWM};
 use smithay::{
-    backend::renderer::utils::on_commit_buffer_handler,
-    delegate_compositor, delegate_shm,
-    reexports::{wayland_protocols::xdg::shell::server::xdg_toplevel::ResizeEdge, wayland_server::{
+    backend::renderer::utils::on_commit_buffer_handler, delegate_compositor, delegate_shm, desktop::layer_map_for_output, reexports::{wayland_protocols::xdg::shell::server::xdg_toplevel::ResizeEdge, wayland_server::{
         Client,
         protocol::{wl_buffer, wl_surface::WlSurface},
-    }},
-    wayland::{
+    }}, wayland::{
         buffer::BufferHandler,
         compositor::{
             CompositorClientState, CompositorHandler, CompositorState, get_parent, is_sync_subsurface
         },
         shm::{ShmHandler, ShmState},
-    }, xwayland::XWaylandClientData,
+    }, xwayland::XWaylandClientData
 };
 
 use super::xdg_shell;
@@ -79,6 +76,10 @@ impl CompositorHandler for AeroWM {
                         _ => {}
                     }
                 }
+            }
+            if self.layer_surfaces.iter().any(|s| s.wl_surface() == surface) {
+                let output = self.space.outputs().next().unwrap();
+                layer_map_for_output(&output).arrange();
             }
             if position_changed { self.sync_window_positions(); }
         }

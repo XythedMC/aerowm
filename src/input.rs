@@ -2,7 +2,7 @@ use smithay::{
     backend::input::{
         AbsolutePositionEvent, Axis, AxisSource, ButtonState, Event, InputBackend, InputEvent,
         KeyState, KeyboardKeyEvent, PointerAxisEvent, PointerButtonEvent, PointerMotionEvent,
-    }, desktop::WindowSurfaceType, input::{
+    }, desktop::{WindowSurfaceType, layer_map_for_output}, input::{
         keyboard::FilterResult,
         pointer::{AxisFrame, ButtonEvent, CursorIcon, CursorImageStatus, Focus, GrabStartData as PointerGrabStartData, MotionEvent},
     }, reexports::{wayland_protocols::xdg::shell::server::xdg_toplevel::ResizeEdge, wayland_server::protocol::wl_surface::WlSurface}, utils::{Logical, Point, Rectangle, SERIAL_COUNTER}, wayland::shell::wlr_layer::KeyboardInteractivity,
@@ -178,6 +178,40 @@ impl AeroWM {
                     (cw.canvas_x..(cw.canvas_x + cw.base_width as f64)).contains(&canvas_cx) &&
                     (cw.canvas_y..(cw.canvas_y + cw.base_height as f64)).contains(&canvas_cy)
                 }) else {
+                    let mut result: Option<(WlSurface, Point<f64, Logical>)> = None; 
+                    {
+                        let layer_map = layer_map_for_output(self.space.outputs().next().unwrap());
+                        for layer in layer_map.layers() {
+                            let geo = layer_map.layer_geometry(layer).unwrap_or_default();
+
+                            let local: Point<f64, Logical> = Point::new(
+                                self.cursor_position.x - geo.loc.to_f64().x, 
+                                self.cursor_position.y - geo.loc.to_f64().y
+                            );
+                            if local.x >= 0.0 && local.y >= 0.0
+                                && local.x < geo.size.w as f64 && local.y < geo.size.h as f64 
+                            {
+                                if let Some((surf, surf_pos)) = layer.surface_under(local, WindowSurfaceType::ALL) {
+                                    result = Some((surf, surf_pos.to_f64() + geo.loc.to_f64()))
+                                } else {
+                                    result = Some((layer.wl_surface().clone(), geo.loc.to_f64()));
+                                }
+                            }
+                        }
+                    }
+                    if let Some((surf, global_pos)) = result {
+                        pointer.motion(
+                            self,
+                            Some((surf, global_pos)),
+                            &MotionEvent { 
+                                location: self.cursor_position, 
+                                serial, 
+                                time: event.time_msec() 
+                            }
+                        );
+                        pointer.frame(self);
+                        return;
+                    }
                     pointer.motion(
                         self,
                         None,
@@ -375,13 +409,13 @@ impl AeroWM {
                     let px = pointer.current_location().x as i32;
                     let py = pointer.current_location().y as i32;
 
-                    if let Some((surface, _pos)) = under {
+                    if let Some((ref surface, _pos)) = under {
                         if let Some(cw) = self
                             .windows
                             .iter_mut()
                             .find(|w| {
-                                w.window.toplevel().map(|t| t.wl_surface() == &surface).unwrap_or(false)
-                                    || w.window.x11_surface().and_then(|s| s.wl_surface()).map_or(false, |s| &s == &surface)
+                                w.window.toplevel().map(|t| t.wl_surface() == surface).unwrap_or(false)
+                                    || w.window.x11_surface().and_then(|s| s.wl_surface()).map_or(false, |s| &s == surface)
                             }) 
                         {
                             let wx = ((cw.canvas_x - self.viewport_x) * self.zoom) as i32;
@@ -566,6 +600,12 @@ impl AeroWM {
                             }
                             ViewMode::TreeView => {}
                         }
+                    } else if under.clone().is_some() && 
+                        self.layer_surfaces.iter().any(|s| s.wl_surface() == &under.as_ref().unwrap().0) 
+                    {
+                        let (surface, _) = under.clone().unwrap();
+                        keyboard.set_focus(self, Some(surface), serial);
+                        self.focused_window_id = None;
                     } else {
                         self.space.elements().for_each(|window| {
                             window.set_activated(false);
@@ -585,8 +625,7 @@ impl AeroWM {
                         }
                     }
                 }
-
-
+                eprintln!("pointer focus: {:?}", pointer.current_focus());
                 pointer.button(
                     self,
                     &ButtonEvent {
