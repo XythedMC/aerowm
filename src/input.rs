@@ -17,12 +17,13 @@ impl AeroWM {
     ) -> ResizeEdge {
         if self.focused_window_id.is_none() { return ResizeEdge::None }
         if cw.id != self.focused_window_id.unwrap() { return ResizeEdge::None }
-        let wx = ((cw.canvas_x - self.viewport_x) * self.zoom) as i32;
-        let wy = ((cw.canvas_y - self.viewport_y) * self.zoom) as i32;
-        let ww = (cw.base_width as f64 * self.zoom) as i32;
-        let wh = (cw.base_height as f64 * self.zoom) as i32;
+        let (viewport_x, viewport_y, zoom) = self.current_viewport();
+        let wx = ((cw.canvas_x - viewport_x) * zoom) as i32;
+        let wy = ((cw.canvas_y - viewport_y) * zoom) as i32;
+        let ww = (cw.base_width as f64 * zoom) as i32;
+        let wh = (cw.base_height as f64 * zoom) as i32;
         
-        let margin = (8.0 / self.zoom) as i32;
+        let margin = (8.0 / zoom) as i32;
         let in_right  = px >= wx + ww  && px < wx + ww + margin && py >= wy - margin && py <= wy + wh + margin;
         let in_left   = px >= wx - 4*margin       && px < wx      && py >= wy - margin && py <= wy + wh + margin;
         let in_bottom = py >= wy + wh  && py < wy + wh + margin && px >= wx - margin && px <= wx + ww + margin;
@@ -50,10 +51,11 @@ impl AeroWM {
             match self.window_edge_at(window, px, py) {
                 ResizeEdge::None => {
                     // If the mouse is inside this window's body, we should stop checking background windows
-                    let wx = (window.canvas_x - self.viewport_x) as i32;
-                    let wy = (window.canvas_y - self.viewport_y) as i32;
-                    let ww = window.base_width as i32;
-                    let wh = window.base_height as i32;
+                    let (vx, vy, zoom) = self.current_viewport();
+                    let wx = ((window.canvas_x - vx) * zoom) as i32;
+                    let wy = ((window.canvas_y - vy) * zoom) as i32;
+                    let ww = (window.base_width as f64 * zoom) as i32;
+                    let wh = (window.base_height as f64 * zoom) as i32;
                     if px >= wx && px < wx + ww && py >= wy && py < wy + wh {
                         break;
                     }
@@ -124,16 +126,21 @@ impl AeroWM {
                 }
             }
             InputEvent::PointerMotion { event, .. } => {
-                let output = self.space.outputs().next().expect("No other monitors connected. Either went through all, or none are connected");
-                let output_geo = self.space.output_geometry(output).expect("Monitor connected but not fully configured, so geometry couldnt be drawn");
-                
                 let serial = SERIAL_COUNTER.next_serial();
                 let keyboard = self.seat.get_keyboard().expect("Keyboard not found - this is a bug");
                 let pointer = self.seat.get_pointer().expect("No pointer/mouse connected or found");
-                
+
                 self.cursor_position += event.delta();
-                self.cursor_position.x = self.cursor_position.x.clamp(output_geo.loc.x as f64, (output_geo.loc.x + output_geo.size.w) as f64);
-                self.cursor_position.y = self.cursor_position.y.clamp(output_geo.loc.y as f64, (output_geo.loc.y + output_geo.size.h) as f64);
+                let (viewport_x, viewport_y, zoom) = self.current_viewport();
+
+                let (min_x, min_y, max_x, max_y) = self.space.outputs()
+                    .filter_map(|o| self.space.output_geometry(o))
+                    .fold((i32::MAX, i32::MAX, i32::MIN, i32::MIN), |(x0, y0, x1, y1), geo| {
+                        (x0.min(geo.loc.x), y0.min(geo.loc.y),
+                         x1.max(geo.loc.x + geo.size.w), y1.max(geo.loc.y + geo.size.h))
+                    });
+                self.cursor_position.x = self.cursor_position.x.clamp(min_x as f64, max_x as f64);
+                self.cursor_position.y = self.cursor_position.y.clamp(min_y as f64, max_y as f64);
                 
                 if self.active_drag {
                     let zoom = self.zoom;
@@ -171,8 +178,8 @@ impl AeroWM {
                     pointer.current_location().y as i32, 
                 );
 
-                let canvas_cx = self.cursor_position.x / self.zoom + self.viewport_x;
-                let canvas_cy = self.cursor_position.y / self.zoom + self.viewport_y;
+                let canvas_cx = self.cursor_position.x / zoom + viewport_x;
+                let canvas_cy = self.cursor_position.y / zoom + viewport_y;
 
                 let Some(window) = self.windows.iter().find(|cw| {
                     (cw.canvas_x..(cw.canvas_x + cw.base_width as f64)).contains(&canvas_cx) &&
@@ -225,8 +232,8 @@ impl AeroWM {
                     return;
                 };
 
-                let local_x = self.cursor_position.x / self.zoom - (window.canvas_x - self.viewport_x);
-                let local_y = self.cursor_position.y / self.zoom - (window.canvas_y - self.viewport_y);
+                let local_x = self.cursor_position.x / zoom - (window.canvas_x - viewport_x);
+                let local_y = self.cursor_position.y / zoom - (window.canvas_y - viewport_y);
 
                 let local: Point<f64, Logical> = Point::new(local_x, local_y);
                 let Some((surf, p)) = window.window.surface_under(local, WindowSurfaceType::ALL) else {
@@ -323,6 +330,8 @@ impl AeroWM {
                 let keyboard = self.seat.get_keyboard().expect("Keyboard not found - this is a bug");
                 let under = self.surface_under(self.cursor_position);
 
+                let (viewport_x, viewport_y, zoom) = self.current_viewport();
+
                 let mods = keyboard.modifier_state();
                 let main_mod = match self.main_modifier {
                     ModifierKey::Ctrl => mods.ctrl,
@@ -355,8 +364,8 @@ impl AeroWM {
                     && button == BTN_LEFT && self.marking_area.is_some() 
                 {
                     let canvas_pos = Point::new(
-                        self.cursor_position.x / self.zoom + self.viewport_x,
-                        self.cursor_position.y / self.zoom + self.viewport_y
+                        self.cursor_position.x / zoom + viewport_x,
+                        self.cursor_position.y / zoom + viewport_y
                     );
                     self.marking_area_start = Some(canvas_pos);
                     return;
@@ -367,8 +376,8 @@ impl AeroWM {
                     let id = self.marking_area.unwrap();
                     let start = self.marking_area_start.unwrap();
                     let end: Point<f64, Logical> = Point::new(
-                        self.cursor_position.x / self.zoom + self.viewport_x,
-                        self.cursor_position.y / self.zoom + self.viewport_y,
+                        self.cursor_position.x / zoom + viewport_x,
+                        self.cursor_position.y / zoom + viewport_y,
                     );
                     let rect: Rectangle<f64, Logical> = Rectangle::from_extremities(
                         (start.x.min(end.x), start.y.min(end.y)), 
@@ -384,8 +393,8 @@ impl AeroWM {
                 if ButtonState::Pressed == button_state && !pointer.is_grabbed()
                     && button == BTN_LEFT && main_mod && !under.is_none()
                 {
-                    let canvas_cx = self.cursor_position.x / self.zoom + self.viewport_x;
-                    let canvas_cy = self.cursor_position.y / self.zoom + self.viewport_y;
+                    let canvas_cx = self.cursor_position.x / zoom + viewport_x;
+                    let canvas_cy = self.cursor_position.y / zoom + viewport_y;
                     if let Some(window) = self.windows.iter().find(|cw| {
                         (cw.canvas_x..(cw.canvas_x + cw.base_width as f64)).contains(&canvas_cx) &&
                         (cw.canvas_y..(cw.canvas_y + cw.base_height as f64)).contains(&canvas_cy)
@@ -418,10 +427,10 @@ impl AeroWM {
                                     || w.window.x11_surface().and_then(|s| s.wl_surface()).map_or(false, |s| &s == surface)
                             }) 
                         {
-                            let wx = ((cw.canvas_x - self.viewport_x) * self.zoom) as i32;
-                            let wy = ((cw.canvas_y - self.viewport_y) * self.zoom) as i32;
-                            let ww = (cw.base_width as f64 * self.zoom) as i32;
-                            let wh = (cw.base_height as f64 * self.zoom) as i32;
+                            let wx = ((cw.canvas_x - viewport_x) * zoom) as i32;
+                            let wy = ((cw.canvas_y - viewport_y) * zoom) as i32;
+                            let ww = (cw.base_width as f64 * zoom) as i32;
+                            let wh = (cw.base_height as f64 * zoom) as i32;
                             
                             let top_left_dist = (((px - wx).pow(2) + (py - wy).pow(2)) as f64).sqrt();
                             let top_right_dist = (((px - wx - ww).pow(2) + (py - wy).pow(2)) as f64).sqrt();
@@ -471,8 +480,8 @@ impl AeroWM {
                             button: BTN_MIDDLE,
                             location: pointer.current_location(),
                         },
-                        initial_viewport_x: self.viewport_x,
-                        initial_viewport_y: self.viewport_y,
+                        initial_viewport_x: viewport_x,
+                        initial_viewport_y: viewport_y,
                     };
                     pointer.set_grab(self, grab, serial, Focus::Clear);
                 } else if ButtonState::Pressed == button_state && !pointer.is_grabbed()
@@ -483,8 +492,8 @@ impl AeroWM {
                     let found = self.windows.iter().rev().find_map(|cw| {
                         match self.window_edge_at(cw, px, py) {
                             ResizeEdge::None => {
-                                let wx = (cw.canvas_x - self.viewport_x) as i32;
-                                let wy = (cw.canvas_y - self.viewport_y) as i32;
+                                let wx = ((cw.canvas_x - viewport_x) * zoom) as i32;
+                                let wy = ((cw.canvas_y - viewport_y) * zoom) as i32;
                                 let ww = cw.base_width as i32;
                                 let wh = cw.base_height as i32;
                                 if px >= wx && px < wx + ww && py >= wy && py < wy + wh { Some((cw.id, ResizeEdge::None)) } else { None }
@@ -555,8 +564,8 @@ impl AeroWM {
                         }
                     }            
                 } else if ButtonState::Pressed == button_state && !pointer.is_grabbed() && !self.active_drag {
-                    let canvas_cx = self.cursor_position.x / self.zoom + self.viewport_x;
-                    let canvas_cy = self.cursor_position.y / self.zoom + self.viewport_y;
+                    let canvas_cx = self.cursor_position.x / zoom + viewport_x;
+                    let canvas_cy = self.cursor_position.y / zoom + viewport_y;
 
                     let hit = self.windows.iter().find(|cw| {
                         (cw.canvas_x..(cw.canvas_x + cw.base_width as f64)).contains(&canvas_cx) &&
@@ -660,18 +669,23 @@ impl AeroWM {
                     let pointer = self.seat.get_pointer().expect("No pointer/mouse connected or found");
                     let pointer_loc = pointer.current_location();
 
-                    let old_zoom = self.zoom;
-                    let zoom_factor = 1.1_f64.powf(-vertical_amount / 15.0);
-                    self.zoom = (self.zoom * zoom_factor).clamp(0.2, 5.0);
-                    self.zoom_target = self.zoom;
+                    if let Some(output) = self.output_under_cursor().cloned() {
+                        if let Some(vs) = self.per_output_state.get_mut(&output) {
+                            let old_zoom = vs.zoom;
+                            let zoom_factor = 1.1_f64.powf(-vertical_amount / 15.0);
+                            vs.zoom = (vs.zoom * zoom_factor).clamp(0.2, 5.0);
+                            self.zoom = vs.zoom;
+                            self.zoom_target = vs.zoom;
 
-                    self.viewport_x += pointer_loc.x * (1.0 / old_zoom - 1.0 / self.zoom);
-                    self.viewport_y += pointer_loc.y * (1.0 / old_zoom - 1.0 / self.zoom);
+                            vs.viewport_x += pointer_loc.x * (1.0 / old_zoom - 1.0 / vs.zoom);
+                            vs.viewport_y += pointer_loc.y * (1.0 / old_zoom - 1.0 / vs.zoom);
 
-                    self.viewport_target_x = self.viewport_x;
-                    self.viewport_target_y = self.viewport_y;
-                    self.viewport_anim_start_x = self.viewport_x;
-                    self.viewport_anim_start_y = self.viewport_y;
+                            self.viewport_target_x = vs.viewport_x;
+                            self.viewport_target_y = vs.viewport_y;
+                            self.viewport_anim_start_x = vs.viewport_x;
+                            self.viewport_anim_start_y = vs.viewport_y;
+                        }
+                    }
 
                     self.sync_window_positions();
                     return;

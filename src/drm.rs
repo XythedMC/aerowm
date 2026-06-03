@@ -1,4 +1,4 @@
-use std::{collections::HashMap, path::Path};
+use std::{collections::{HashMap, HashSet}, path::Path};
 
 use smithay::{
     backend::{
@@ -14,13 +14,14 @@ use smithay::{
     output::{Mode as WlMode, Output, OutputModeSource, PhysicalProperties, Scale, Subpixel},
     reexports::{
         calloop::{EventLoop, LoopHandle},
-        drm::{buffer::DrmFourcc, control::{Device, connector::State, crtc::Handle}},
+        drm::{buffer::DrmFourcc, control::{Device, connector::State, crtc::Handle, property::Value}},
         input::Libinput,
     },
     utils::Size,
 };
 use rustix::fs::OFlags;
-use crate::{AeroWM, rendering, state::{GbmDrmCompositor, GpuData}};
+use libdisplay_info::info::Info;
+use crate::{AeroWM, rendering, state::{GbmDrmCompositor, GpuData, ViewportState}};
 
 fn open_gpu(
     device_id: u64,
@@ -52,29 +53,52 @@ fn open_gpu(
     let solid_prog = rendering::compile_solid(&mut renderer);
     let border_prog = rendering::compile_border(&mut renderer);
 
-
     let resources = drm.resource_handles().expect("Failed to get DRM resources");
     let mut compositors: HashMap<Handle, GbmDrmCompositor> = HashMap::new();
+
+    let mut crtc_to_output: HashMap<Handle, Output> = HashMap::new();
+    let mut used_crtcs: HashSet<Handle> = HashSet::new();
+    let mut x_offset = 0;
 
     for &connector_handle in resources.connectors() {
         let info = drm.get_connector(connector_handle, true).unwrap();
         if info.state() != State::Connected {
             continue;
         }
+        let properties = drm.get_properties(connector_handle).expect("handle doesnt have properties");
+        let mut make: Option<String> = None;
+        let mut model: Option<String> = None;
+        let mut serial_number: Option<String> = None;
+        for (handle, value) in properties {
+            let property = drm.get_property(handle).unwrap();
+            let name = property.name().to_str().unwrap();
+            if name == "EDID" {
+                let value_type = property.value_type();
+                let value = value_type.convert_value(value);
+                if let Value::Blob(blob_handle) = value {
+                    let blob = drm.get_property_blob(blob_handle).unwrap();
+                    if let Ok(info_property) = Info::parse_edid(&blob) {
+                        make = info_property.make();
+                        model = info_property.model();
+                        serial_number = info_property.serial();
+                    }
+                }
+            }
+        }
 
         let mode = info.modes()[0];
         let (mw, mh) = mode.size();
 
         let output = Output::new(
-            format!("{:?}", connector_handle),
+            format!("{}-{}", info.interface().as_str(), info.interface_id()),
             PhysicalProperties {
                 size: info.size()
                     .map(|(w, h)| (w as i32, h as i32).into())
                     .unwrap_or_default(),
-                subpixel: Subpixel::Unknown,
-                make: "Unknown".to_string(),
-                model: "Unknown".to_string(),
-                serial_number: "Unknown".to_string(),
+                subpixel: info.subpixel().into(),
+                make: if make.is_some() { make.unwrap() } else { "Unknown".to_string() },
+                model: if model.is_some() { model.unwrap() } else { "Unknown".to_string() },
+                serial_number: if serial_number.is_some() { serial_number.unwrap() } else { "Unknown".to_string() },
             },
         );
         let wl_mode = WlMode {
@@ -85,17 +109,22 @@ fn open_gpu(
             Some(wl_mode), 
             None, 
             Some(Scale::Fractional(1.0)), 
-            Some((0, 0).into())
+            Some((x_offset, 0).into())
         );
         output.set_preferred(wl_mode);
         output.create_global::<AeroWM>(&state.display_handle);
 
         state.scale = output.current_scale().fractional_scale();
-        state.space.map_output(&output, (0, 0));
+        state.space.map_output(&output, (x_offset, 0));
+        state.per_output_state.insert(output.clone(), ViewportState { viewport_x: x_offset as f64, viewport_y: 0.0, zoom: 1.0 });
+        x_offset += mw as i32;
 
         for &encoder in info.encoders() {
             let encoder_info = drm.get_encoder(encoder).unwrap();
-            let crtc = resources.filter_crtcs(encoder_info.possible_crtcs())[0];
+            let crtcs = resources.filter_crtcs(encoder_info.possible_crtcs());
+            let Some(&crtc) = crtcs.iter().find(|c| !used_crtcs.contains(c)) else {
+                continue;
+            };
             let surface = drm.create_surface(crtc, mode, &[connector_handle])
                 .expect("Failed to create DRM surface");
 
@@ -124,6 +153,8 @@ fn open_gpu(
 
             eprintln!("GPU ready, first frame queued for crtc {:?}", crtc);
             compositors.insert(crtc, compositor);
+            crtc_to_output.insert(crtc, output.clone());
+            used_crtcs.insert(crtc);
             break; // one compositor per connector
         }
     }
@@ -134,6 +165,7 @@ fn open_gpu(
         gbm,
         renderer,
         compositors,
+        crtc_to_output,
         line_prog,
         solid_prog,
         border_prog,

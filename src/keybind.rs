@@ -162,13 +162,23 @@ impl AeroWM {
             self.viewport_target_y = 0.0;
             self.viewport_x = 0.0;
             self.viewport_y = 0.0;
+            self.zoom = 1.0;
+            self.zoom_target = 1.0;
             self.viewport_anim_start_x = 0.0;
             self.viewport_anim_start_y = 0.0;
+            if let Some(output) = self.output_under_cursor().cloned() {
+                if let Some(vs) = self.per_output_state.get_mut(&output) {
+                    vs.viewport_x = self.viewport_x;
+                    vs.viewport_y = self.viewport_y;
+                    vs.zoom = self.zoom;
+                }
+            }
             self.apply_layout();
         } else {
             self.snap_to_roots();
         }
     }
+
     fn close(&self) {
         if self.focused_window_id.is_none() { return; }
         self.windows

@@ -1,4 +1,12 @@
-use std::{collections::HashMap, env::set_var, ffi::OsString, iter::empty, process::{Command, Stdio}, sync::Arc, time::{Duration, Instant}};
+use std::{
+    collections::HashMap, 
+    env::set_var, 
+    ffi::OsString, 
+    iter::empty, 
+    process::{Command, Stdio}, 
+    sync::{Arc, Mutex}, 
+    time::{Duration, Instant}
+};
 
 use mlua::Error;
 use smithay::{
@@ -12,20 +20,15 @@ use smithay::{
             gles::{GlesPixelProgram, GlesRenderer, GlesTexture, UniformName, UniformType, element::PixelShaderElement, ffi}
         }, 
         session::libseat::LibSeatSession
-    }, 
-    desktop::{LayerSurface, PopupManager, Space, Window, WindowSurfaceType, layer_map_for_output}, 
-    input::{Seat, SeatState, pointer::CursorImageStatus}, 
-    reexports::{
+    }, desktop::{LayerSurface, PopupManager, Space, Window, WindowSurfaceType, layer_map_for_output}, input::{Seat, SeatState, pointer::CursorImageStatus}, output::Output, reexports::{
         calloop::{EventLoop, Interest, LoopSignal, Mode, PostAction, RegistrationToken, generic::Generic}, drm::control::crtc::Handle, wayland_protocols::xdg::shell::server::xdg_toplevel::ResizeEdge, wayland_server::{
             Display, 
             DisplayHandle, 
             backend::{ClientData, ClientId, DisconnectReason}, 
             protocol::wl_surface::WlSurface
         }
-    }, 
-    utils::{DeviceFd, Logical, Point, Rectangle, SERIAL_COUNTER, Size}, 
-    wayland::{
-        compositor::{CompositorClientState, CompositorState}, 
+    }, utils::{DeviceFd, Logical, Point, Rectangle, SERIAL_COUNTER, Size}, wayland::{
+        compositor::{self, CompositorClientState, CompositorState}, 
         cursor_shape::CursorShapeManagerState, 
         dmabuf::{DmabufState, ImportNotifier}, 
         fractional_scale::FractionalScaleManagerState, 
@@ -34,7 +37,7 @@ use smithay::{
             data_device::DataDeviceState,
             primary_selection::PrimarySelectionState,
         }, 
-        shell::{wlr_layer::WlrLayerShellState, xdg::{XdgShellState, decoration::XdgDecorationState}}, 
+        shell::{wlr_layer::WlrLayerShellState, xdg::{XdgShellState, XdgToplevelSurfaceRoleAttributes, decoration::XdgDecorationState}}, 
         shm::ShmState, 
         socket::ListeningSocketSource, 
         viewporter::ViewporterState, 
@@ -85,7 +88,8 @@ pub struct GpuData {
     pub gbm: GbmDevice<DrmDeviceFd>,
     pub renderer: GlesRenderer,
     pub compositors: HashMap<Handle, GbmDrmCompositor>,
-
+    pub crtc_to_output: HashMap<Handle, Output>,
+    
     pub line_prog: Option<GlesPixelProgram>,
     pub solid_prog: Option<GlesPixelProgram>,
     pub border_prog: Option<GlesPixelProgram>,
@@ -96,6 +100,12 @@ pub struct BackendData {
     pub gpus: HashMap<u64, GpuData>,
     pub libinput: RegistrationToken,
     pub udev_token: RegistrationToken,
+}
+
+pub struct ViewportState {
+    pub viewport_x: f64,
+    pub viewport_y: f64,
+    pub zoom: f64,
 }
 
 /// A window with its position on the infinite canvas and its place in the window tree.
@@ -161,6 +171,8 @@ pub struct AeroWM {
     /// Animated viewport destination.
     pub viewport_target_x: f64,
     pub viewport_target_y: f64,
+
+    pub per_output_state: HashMap<Output, ViewportState>,
 
     // Zoom
     pub zoom_anim_start: f64,
@@ -315,6 +327,7 @@ impl AeroWM {
             viewport_target_y: 0.0,
             viewport_anim_start_x: 0.0,
             viewport_anim_start_y: 0.0,
+            per_output_state: HashMap::new(),
             zoom_anim_start: 1.0,
             zoom_target: 1.0,
             zoom_returning: false,
@@ -814,6 +827,8 @@ impl AeroWM {
                 let clear_color = color.map(|x| x as f32 / 255.0);
 
                 let gpu_data = self.gpu.get_mut(&device_id).unwrap();
+                let output = gpu_data.crtc_to_output.get(&handle);
+                eprintln!("{:?}", handle);
                 let Some(compositor) = gpu_data.compositors.get_mut(&handle) else { return; };
 
                 compositor.frame_submitted().ok();
@@ -889,6 +904,10 @@ impl AeroWM {
                     }
                 }
 
+                let output_position = self.space.output_geometry(output.unwrap()).unwrap().loc;
+                let cursor_pos = self.cursor_position - Point::new(output_position.x as f64, 0.0);
+
+                let vs = self.per_output_state.get(output.unwrap()).unwrap();
 
                 let elements = build_render_elements(
                     &self.windows,
@@ -897,13 +916,13 @@ impl AeroWM {
                     self.view_mode,
                     &self.tiling_visible_ids,
                     self.scale,
-                    self.zoom,
-                    self.viewport_x,
-                    self.viewport_y,
+                    vs.zoom,
+                    vs.viewport_x + output_position.x as f64 / vs.zoom,
+                    vs.viewport_y,
                     &self.config,
                     &self.show_areas,
                     &self.areas,
-                    self.cursor_position,
+                    cursor_pos,
                     &self.cursor_texture,
                     &self.background_texture,
                     &self.background_shader_prog,
@@ -988,7 +1007,25 @@ impl AeroWM {
             DrmEvent::Error(error) => eprintln!("DRM error: {:?}", error),
         }
     }
+
+    pub fn output_under_cursor(&self) -> Option<&Output> {
+        for output in self.space.outputs() {
+            let geo = self.space.output_geometry(output).unwrap();
+            if geo.contains(self.cursor_position.to_i32_round()) {
+                return Some(output);
+            }
+        }
+        None
+    }
     
+    pub fn current_viewport(&self) -> (f64, f64, f64) {
+        if let Some(output) = self.output_under_cursor() {
+            if let Some(vs) = self.per_output_state.get(output) {
+                return (vs.viewport_x, vs.viewport_y, vs.zoom);
+            }
+        }
+        (0.0, 0.0, 1.0)
+    }
     // -- Launch Apps --------------------------------
     pub fn launch_app(&mut self, name: &str) {
         let (x, y) = (self.cursor_position.x, self.cursor_position.y);
@@ -1056,6 +1093,12 @@ impl AeroWM {
     pub fn pan(&mut self, dx: f64, dy: f64) {
         self.viewport_x += dx;
         self.viewport_y += dy;
+        if let Some(output) = self.output_under_cursor().cloned() {
+            if let Some(vs) = self.per_output_state.get_mut(&output) {
+                vs.viewport_x += dx;
+                vs.viewport_y += dy;
+            }
+        }
         // Keep target in sync so any in-progress viewport animation doesn't fight pan.
         self.viewport_target_x = self.viewport_x;
         self.viewport_target_y = self.viewport_y;
@@ -1071,8 +1114,8 @@ impl AeroWM {
             .windows
             .iter()
             .map(|cw| {
-                let sx = ((cw.canvas_x - self.viewport_x) * zoom) as i32;
-                let sy = ((cw.canvas_y - self.viewport_y) * zoom) as i32;
+                let sx = ((cw.canvas_x - self.current_viewport().0) * zoom) as i32;
+                let sy = ((cw.canvas_y - self.current_viewport().1) * zoom) as i32;
                 (cw.window.clone(), sx, sy)
             })
             .collect();
@@ -1113,6 +1156,13 @@ impl AeroWM {
         self.viewport_y = self.viewport_anim_start_y
             + (self.viewport_target_y - self.viewport_anim_start_y) * ease_t;
         self.zoom = self.zoom_anim_start + (self.zoom_target - self.zoom_anim_start) * ease_t;
+        if let Some(output) = self.output_under_cursor().cloned() {
+            if let Some(vs) = self.per_output_state.get_mut(&output) {
+                vs.viewport_x = self.viewport_x;
+                vs.viewport_y = self.viewport_y;
+                vs.zoom = self.zoom;
+            }
+        }
         if t >= 1.0 && self.zoom_returning == false && self.zoom_animating {
             self.zoom_target = 1.0;
             self.zoom_anim_start = self.zoom;
@@ -1242,13 +1292,16 @@ impl AeroWM {
     }
 
     pub fn handle_ipc_cmd(&mut self, cmd: crate::ipc::InternalCommand) {
-        use crate::ipc::{InternalCommand, TreeWindow, TreeViewport, TreeResponse, IpcEvent};
+        use crate::ipc::{
+            InternalCommand, TreeWindow, TreeViewport, TreeResponse, 
+            AreasResponse, MonitorsResponse, MonitorInfo, IpcEvent
+        };
         match cmd {
             InternalCommand::GetTree { reply_to } => {
                 let windows = self.windows.iter().map(|cw| {
                     let title = cw.window.toplevel().map(|t| {
-                        smithay::wayland::compositor::with_states(t.wl_surface(), |states| {
-                            states.data_map.get::<std::sync::Mutex<smithay::wayland::shell::xdg::XdgToplevelSurfaceRoleAttributes>>()
+                        compositor::with_states(t.wl_surface(), |states| {
+                            states.data_map.get::<Mutex<XdgToplevelSurfaceRoleAttributes>>()
                                 .and_then(|attr| attr.lock().unwrap_or_else(|e| {
                                     tracing::warn!("Mutex poisoned getting window title: {e}");
                                     e.into_inner()
@@ -1317,6 +1370,53 @@ impl AeroWM {
                     self.apply_layout();
                     self.emit_event(IpcEvent::ModeChanged { mode: mode.clone() });
                 }
+            }
+            InternalCommand::Launch { command } => self.launch_app(&command),
+            InternalCommand::Close { id } => {
+                if let Ok(id) = id.parse::<u32>() {
+                    if self.windows.iter().any(|cw| cw.id == id) == false {
+                        return;
+                    }
+                    self.windows
+                        .iter()
+                        .find(|cw| cw.id == id)
+                        .and_then(|cw| cw.window.toplevel()
+                        .map(|t| t.send_close()));
+                } else { return; }
+            }
+            InternalCommand::GetAreas { reply_to } => {
+                let resp = AreasResponse {
+                    areas: self.areas.iter().map(|(id, rect)| {
+                        (*id, [rect.loc.x, rect.loc.y, rect.size.w, rect.size.h])
+                    }).collect(),
+                    current_area: self.current_area
+                };
+                let _ = reply_to.send(serde_json::to_string(&resp).unwrap());
+            }
+            InternalCommand::GetMonitors { reply_to } => {
+                let outputs = self.space.outputs();
+                let mut monitors: Vec<MonitorInfo> = Vec::new();
+                for output in outputs {
+                    let properties = output.physical_properties();
+                    let size = self.space.output_geometry(output).unwrap().size;
+                    let position = self.space.output_geometry(output).unwrap().loc;
+                    let info = MonitorInfo {
+                        name: output.name(),
+                        make: properties.make,
+                        model: properties.model,
+                        serial: properties.serial_number,
+                        x: position.x,
+                        y: position.y,
+                        width: size.w,
+                        height: size.h,
+                        refresh_rate: output.current_mode().unwrap().refresh,
+                        scale: output.current_scale().fractional_scale(),
+                        focused: self.output_under_cursor().map_or(false, |o| o == output),
+                    };
+                    monitors.push(info);
+                }   
+                let resp = MonitorsResponse { monitors };
+                let _ = reply_to.send(serde_json::to_string(&resp).unwrap());
             }
         }
     }

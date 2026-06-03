@@ -308,24 +308,32 @@ pub fn build_render_elements(
 
     for window in sorted_windows {
         if view_mode == ViewMode::Tiling && !tiling_visible_ids.contains(&window.id) {continue;}
-        if let Some(geo) = space.element_geometry(&window.window) {
-            let geom_offset = window.window.geometry().loc;
-            let surface_phys = (geo.loc - geom_offset).to_physical_precise_round(scale);
-            let phys_loc = geo.loc.to_physical_precise_round(scale);
-            if let Some(prog) = &border_prog {
-                overlays.push(AeroWMElement::Shader(focus_border_elements(Some(window.id), config.clone(), zoom, prog, window, geo)));
-            }
-            overlays.extend(
-                window.window.render_elements::<WaylandSurfaceRenderElement<GlesRenderer>>(
-                    renderer,
-                    surface_phys,
-                    Scale::from(scale),
-                    1.0,
-                ).into_iter().map(|e| AeroWMElement::ScaledSurface(
-                    RescaleRenderElement::from_element(e, phys_loc, Scale::from(zoom))
-                ))
-            );
+        
+        let sx = ((window.canvas_x - viewport_x) * zoom) as i32;
+        let sy = ((window.canvas_y - viewport_y) * zoom) as i32;
+        let screen_loc = Point::from((sx, sy));
+        let geom_offset = window.window.geometry().loc;
+        let surface_phys = (screen_loc - geom_offset).to_physical_precise_round(scale);
+        let phys_loc = screen_loc.to_physical_precise_round(scale);
+
+        let geo = Rectangle { 
+            loc: screen_loc, 
+            size: window.window.geometry().size
+        };
+        
+        if let Some(prog) = &border_prog {
+            overlays.push(AeroWMElement::Shader(focus_border_elements(Some(window.id), config.clone(), zoom, prog, window, geo)));
         }
+        overlays.extend(
+            window.window.render_elements::<WaylandSurfaceRenderElement<GlesRenderer>>(
+                renderer,
+                surface_phys,
+                Scale::from(scale),
+                1.0,
+            ).into_iter().map(|e| AeroWMElement::ScaledSurface(
+                RescaleRenderElement::from_element(e, phys_loc, Scale::from(zoom))
+            ))
+        );
     }
 
     for w in or_windows {

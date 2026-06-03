@@ -8,6 +8,7 @@ anyhow = "1.0.102"
 dirs = "6.0.0"
 hex_color = "3.0.0"
 image = "0.25.10"
+libdisplay-info = "0.3.0"
 mlua = {version = "0.11.6", features = ["lua54", "vendored"]}
 notify = "8.2.0"
 rustix = "1.1.4"

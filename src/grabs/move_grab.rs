@@ -34,10 +34,11 @@ impl PointerGrab<AeroWM> for MoveSurfaceGrab {
     ) {
         // No surface has pointer focus while dragging.
         handle.motion(data, None, event);
-
+        let zoom = data.current_viewport().2;   
         let delta = event.location - self.start_data.location;
-        let new_canvas_x = self.initial_canvas_x + delta.x;
-        let new_canvas_y = self.initial_canvas_y + delta.y;
+
+        let new_canvas_x = self.initial_canvas_x + delta.x / zoom;
+        let new_canvas_y = self.initial_canvas_y + delta.y / zoom;
 
         // Keep canvas coordinates in sync so panning still works correctly.
         for cw in data.windows.iter_mut() {
@@ -58,9 +59,10 @@ impl PointerGrab<AeroWM> for MoveSurfaceGrab {
                 break;
             }
         }
+        let (vx, vy, zoom) = data.current_viewport();
 
-        let screen_x = (new_canvas_x - data.viewport_x) as i32;
-        let screen_y = (new_canvas_y - data.viewport_y) as i32;
+        let screen_x = ((new_canvas_x - vx) * zoom) as i32;
+        let screen_y = ((new_canvas_y - vy) * zoom) as i32;
         data.space.map_element(self.window.clone(), (screen_x, screen_y), true);
     }
 

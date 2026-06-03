@@ -41,8 +41,10 @@ impl XdgShellHandler for AeroWM {
             (size.w, size.h)
         });
 
-        let canvas_x = self.cursor_position.x / self.zoom + self.viewport_target_x - initial_w as f64 / 2.0;
-        let canvas_y = self.cursor_position.y / self.zoom + self.viewport_target_y - initial_h as f64 / 2.0;
+        let (vx, vy, zoom) = self.current_viewport();
+
+        let canvas_x = self.cursor_position.x / zoom + vx - initial_w as f64 / 2.0;
+        let canvas_y = self.cursor_position.y / zoom + vy - initial_h as f64 / 2.0;
 
         let window = Window::new_wayland_window(surface);
         let screen_x = self.cursor_position.x as i32;

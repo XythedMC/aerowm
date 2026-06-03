@@ -28,18 +28,25 @@ impl PointerGrab<AeroWM> for PanCanvasGrab {
     ) {
         handle.motion(data, None, event);
 
-        // Update software cursor position (not updated by PointerMotion during grabs).
-        if let Some(output) = data.space.outputs().next() {
-            if let Some(geo) = data.space.output_geometry(output) {
-                data.cursor_position.x = event.location.x.clamp(geo.loc.x as f64, (geo.loc.x + geo.size.w) as f64);
-                data.cursor_position.y = event.location.y.clamp(geo.loc.y as f64, (geo.loc.y + geo.size.h) as f64);
-            }
-        }
+        let (min_x, min_y, max_x, max_y) = data.space.outputs()
+            .filter_map(|o| data.space.output_geometry(o))
+            .fold((i32::MAX, i32::MAX, i32::MIN, i32::MIN), |(x0, y0, x1, y1), geo| {
+                (x0.min(geo.loc.x), y0.min(geo.loc.y),
+                    x1.max(geo.loc.x + geo.size.w), y1.max(geo.loc.y + geo.size.h))
+        });
+        data.cursor_position.x = event.location.x.clamp(min_x as f64, max_x as f64);
+        data.cursor_position.y = event.location.y.clamp(min_y as f64, max_y as f64);
 
         // Divide screen-pixel delta by zoom so 1 mouse px = 1 screen px of canvas movement.
         let delta = event.location - self.start_data.location;
-        data.viewport_x = self.initial_viewport_x - delta.x / data.zoom;
-        data.viewport_y = self.initial_viewport_y - delta.y / data.zoom;
+        data.viewport_x = self.initial_viewport_x - delta.x / data.current_viewport().2;
+        data.viewport_y = self.initial_viewport_y - delta.y / data.current_viewport().2;
+        if let Some(output) = data.output_under_cursor().cloned() {
+            if let Some(vs) = data.per_output_state.get_mut(&output) {
+                vs.viewport_x = data.viewport_x;
+                vs.viewport_y = data.viewport_y;
+            }
+        }
         // Keep target/anim_start in sync so no animation fights the pan.
         data.viewport_target_x = data.viewport_x;
         data.viewport_target_y = data.viewport_y;

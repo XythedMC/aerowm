@@ -32,8 +32,9 @@ impl PointerGrab<AeroWM> for ResizeSurfaceGrab {
         handle.motion(data, None, event);
         eprintln!("resizing window");
 
+        let zoom = data.current_viewport().2;
+
         let raw_delta = event.location - self.start_data.location;
-        let zoom = data.zoom;
         let dx = (raw_delta.x / zoom) as i32;
         let dy = (raw_delta.y / zoom) as i32;
 

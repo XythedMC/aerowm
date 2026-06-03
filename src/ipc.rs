@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 use smithay::reexports::calloop::channel::Sender;
 use tokio::sync::broadcast::Receiver;
+use std::collections::HashMap;
 use std::path::Path;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::UnixListener;
@@ -17,6 +18,14 @@ pub enum IpcCommand {
     Pan { dx: f64, dy: f64 },
     #[serde(rename = "set_mode")]
     SetMode { mode: String },
+    #[serde(rename = "launch")]
+    Launch { command: String },
+    #[serde(rename = "close")]
+    Close { id: String },
+    #[serde(rename = "get_areas")]
+    GetAreas,
+    #[serde(rename = "get_monitors")]
+    GetMonitors,
 }
 
 pub enum InternalCommand {
@@ -24,6 +33,10 @@ pub enum InternalCommand {
     Focus { id: String },
     Pan { dx: f64, dy: f64 },
     SetMode { mode: String },
+    Launch { command: String },
+    Close { id: String },
+    GetAreas { reply_to: oneshot::Sender<String> },
+    GetMonitors { reply_to: oneshot::Sender<String> },
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -67,6 +80,32 @@ pub struct TreeResponse {
     pub windows: Vec<TreeWindow>,
     pub viewport: TreeViewport,
     pub mode: String,
+}
+
+#[derive(Serialize, Debug, Clone)]
+pub struct MonitorInfo {
+    pub name: String,
+    pub make: String,
+    pub model: String,
+    pub serial: String,
+    pub x: i32,
+    pub y: i32,
+    pub width: i32,
+    pub height: i32,
+    pub refresh_rate: i32,
+    pub scale: f64,
+    pub focused: bool,
+}
+
+#[derive(Serialize, Debug, Clone)]
+pub struct MonitorsResponse {
+    pub monitors: Vec<MonitorInfo>,
+}
+
+#[derive(Serialize, Debug, Clone)]
+pub struct AreasResponse {
+    pub areas: HashMap<u32, [f64; 4]>,
+    pub current_area: Option<u32>,
 }
 
 pub async fn run_ipc_server(
@@ -120,6 +159,26 @@ pub async fn run_ipc_server(
                                         IpcCommand::Focus { id } => InternalCommand::Focus { id },
                                         IpcCommand::Pan { dx, dy } => InternalCommand::Pan { dx, dy },
                                         IpcCommand::SetMode { mode } => InternalCommand::SetMode { mode },
+                                        IpcCommand::Launch { command } => InternalCommand::Launch { command },
+                                        IpcCommand::Close { id } => InternalCommand::Close { id },
+                                        IpcCommand::GetAreas => {
+                                            let (tx, rx) = oneshot::channel();
+                                            let _ = cmd_tx.send(InternalCommand::GetAreas { reply_to: tx });
+                                            if let Ok(tree_json) = rx.await {
+                                                let _ = write_half.write_all(format!("{}\n", tree_json).as_bytes()).await;
+                                            }
+                                            line.clear();
+                                            continue;
+                                        }
+                                        IpcCommand::GetMonitors => {
+                                            let (tx, rx) = oneshot::channel();
+                                            let _ = cmd_tx.send(InternalCommand::GetMonitors { reply_to: tx });
+                                            if let Ok(tree_json) = rx.await {
+                                                let _ = write_half.write_all(format!("{}\n", tree_json).as_bytes()).await;
+                                            }
+                                            line.clear();
+                                            continue;                                            
+                                        }
                                     };
                                     let _ = cmd_tx.send(internal_cmd);
                                 }
