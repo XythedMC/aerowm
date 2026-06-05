@@ -11,7 +11,7 @@ use smithay::{
         udev::{UdevBackend, UdevEvent},
     },
     desktop::space::SpaceRenderElements,
-    output::{Mode as WlMode, Output, OutputModeSource, PhysicalProperties, Scale, Subpixel},
+    output::{Mode as WlMode, Output, OutputModeSource, PhysicalProperties, Scale},
     reexports::{
         calloop::{EventLoop, LoopHandle},
         drm::{buffer::DrmFourcc, control::{Device, connector::State, crtc::Handle, property::Value}},
@@ -90,7 +90,7 @@ fn open_gpu(
         let monitor_cfg = state.config.monitors.iter().find(|m| m.name == output_name);
 
         let mode = monitor_cfg
-            .and_then(|cfg| info.modes().iter().min_by_key(|m| ((m.vrefresh() as f64 - cfg.refresh_rate).abs() as i64)))
+            .and_then(|cfg| info.modes().iter().min_by_key(|m| (m.vrefresh() as f64 - cfg.refresh_rate).abs() as i64))
             .or_else(|| info.modes().first())
             .copied()
             .unwrap();

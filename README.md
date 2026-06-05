@@ -142,18 +142,17 @@ Modifiers: `Ctrl`, `Alt`, `Shift`, `Super`. Mouse buttons: `left`, `right`, `mid
 ## Planned / In Progress
 
 - ~~**XWayland support** - compatibility with X11 applications~~
-- **Multi-output support** - multiple monitors
+- ~~**Multi-output support** - multiple monitors~~
 - **wlr protocols** - layer shell (bars, docks, notifications), screencopy, data control, idle notify, session lock
 - ~~**Background images and shaders** - image backgrounds and custom GLSL shaders~~
-- **Trackpad support** - gestures for panning, zooming, and switching views
+- ~~**Trackpad support** - gestures for panning, zooming, and switching views~~
 - **Animations** - window open/close transitions
 - **Scratchpad** - floating windows outside the tree
 - **Window rules** - auto-assign apps to positions or parents on launch
-- **IPC** - full external control protocol over the Unix socket
+- ~~**IPC** - full external control protocol over the Unix socket~~
 - **Screenshot/screencopy** - wlr-screencopy protocol support
 - **Clipboard manager support** - wlr-data-control protocol
 - **Idle/lock screen** - ext-idle-notify and ext-session-lock support
-- **Named workspaces** - map subtrees to named workspaces with fast switching
 - ~~**Config hot-reload** - reload the Lua config without restarting~~
 - **Multi-language input** - IME support for non-Latin scripts
 

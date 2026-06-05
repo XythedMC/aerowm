@@ -180,6 +180,8 @@ pub struct AeroWM {
     pub zoom_returning: bool,
     pub zoom_animating: bool,
 
+    pub pinch_last_scale: f64,
+
     // Animations
     pub(crate) viewport_anim_start_x: f64,
     pub(crate) viewport_anim_start_y: f64,
@@ -332,6 +334,7 @@ impl AeroWM {
             zoom_target: 1.0,
             zoom_returning: false,
             zoom_animating: false,
+            pinch_last_scale: 1.0,
             scale: 1.0,
             anim_start: None,
             next_window_id: 0,

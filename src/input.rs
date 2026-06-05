@@ -1,7 +1,6 @@
 use smithay::{
     backend::input::{
-        AbsolutePositionEvent, Axis, AxisSource, ButtonState, Event, InputBackend, InputEvent,
-        KeyState, KeyboardKeyEvent, PointerAxisEvent, PointerButtonEvent, PointerMotionEvent,
+        AbsolutePositionEvent, Axis, AxisSource, ButtonState, Event, GesturePinchUpdateEvent, GestureSwipeUpdateEvent, InputBackend, InputEvent, KeyState, KeyboardKeyEvent, PointerAxisEvent, PointerButtonEvent, PointerMotionEvent
     }, desktop::{WindowSurfaceType, layer_map_for_output}, input::{
         keyboard::FilterResult,
         pointer::{AxisFrame, ButtonEvent, CursorIcon, CursorImageStatus, Focus, GrabStartData as PointerGrabStartData, MotionEvent},
@@ -716,6 +715,33 @@ impl AeroWM {
                     pointer.axis(self, frame);
                     pointer.frame(self);
                 }
+            }
+            InputEvent::GestureSwipeUpdate { event, .. } => {
+                self.pan(event.delta_x(), event.delta_y());
+                self.sync_window_positions();
+            }
+            InputEvent::GesturePinchUpdate { event, .. } => {
+                if let Some(output) = self.output_under_cursor().cloned() {
+                    if let Some(vs) = self.per_output_state.get_mut(&output) {
+                        let old_zoom = vs.zoom;
+                        let zoom_factor = event.scale() / self.pinch_last_scale;
+                        vs.zoom = (vs.zoom * zoom_factor).clamp(0.2, 5.0);
+                        self.zoom = vs.zoom;
+                        self.zoom_target = vs.zoom;
+
+                        vs.viewport_x += self.cursor_position.x * (1.0 / old_zoom - 1.0 / vs.zoom);
+                        vs.viewport_y += self.cursor_position.y * (1.0 / old_zoom - 1.0 / vs.zoom);
+
+                        self.viewport_target_x = vs.viewport_x;
+                        self.viewport_target_y = vs.viewport_y;
+                        self.viewport_anim_start_x = vs.viewport_x;
+                        self.viewport_anim_start_y = vs.viewport_y;
+                    }
+                    self.pinch_last_scale = event.scale();
+                }
+            }
+            InputEvent::GesturePinchBegin { event: _, .. } => {
+                self.pinch_last_scale = 1.0;
             }
             _ => {}
         }
