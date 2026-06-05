@@ -41,12 +41,23 @@ pub struct AeroWMConfig {
     pub area_border_thickness: i32,
     pub area_colors: Vec<[u8; 4]>,
     pub always_show_areas: bool,
+
+    pub monitors: Vec<MonitorConfig>
 }
 
 #[derive(Debug, Clone)]
 pub struct LaunchRule {
     pub args: Option<String>,
     pub env: Option<HashMap<String, String>>
+}
+
+#[derive(Debug, Clone)]
+pub struct MonitorConfig {
+    pub name: String,
+    pub x: i32,
+    pub y: i32,
+    pub refresh_rate: f64,
+    pub scale: f64,
 }
 
 pub fn get_colors_rgba(key: &str) -> [u8; 4] {
@@ -74,9 +85,22 @@ pub fn read_config() -> Result<AeroWMConfig, Error> {
         keybinds_clone.borrow_mut().push((keybind, action));
         Ok(())
     })?)?;
+
+    let monitors: Vec<MonitorConfig> = Vec::new();
+    let monitors = Rc::new(RefCell::new(monitors));
+    let monitors_clone = monitors.clone();
+
+    lua.globals().set("monitor", lua.create_function(move |_, (name, position, refresh_rate, scale): (String, String, f64, f64)| {
+        let parts: Vec<&str> = position.split("x").collect();
+        let x = parts[0].parse::<i32>().unwrap_or(0);
+        let y = parts[1].parse::<i32>().unwrap_or(0);
+        monitors_clone.borrow_mut().push(MonitorConfig { name, x, y, refresh_rate, scale });
+        Ok(())
+    })?)?;
     
     lua.load(&contents).exec().map_err(|e| Error::runtime(e.to_string()))?;
     let keybinds = keybinds.borrow().clone();
+    let monitors = monitors.borrow().clone();
 
     let table = lua.globals().get::<Table>("config").map_err(|e| Error::runtime(e.to_string()))?;
     
@@ -162,6 +186,7 @@ pub fn read_config() -> Result<AeroWMConfig, Error> {
         area_colors,
         area_border_thickness,
         always_show_areas,
+        monitors,
     })
 }
 
@@ -260,6 +285,10 @@ bind("Ctrl+Down",        "pan", "0 100")
 
 -- Quit
 bind("Ctrl+Alt+BackSpace", "quit")
+
+-- Monitors
+monitor("HDMI-A-1", "2560x0", 74.78, 1.0)
+monitor("DP-1", "0x0", 165.08, 1.0)
 "#.replace("$HOME", home_dir().expect("home dir not found, how are you reading this?").to_str().unwrap());
 
     create_dir_all(result_path.parent().ok_or_else(|| anyhow!("Parent path couldn't be found"))?)?;

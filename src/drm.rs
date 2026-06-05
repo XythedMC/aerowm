@@ -86,11 +86,19 @@ fn open_gpu(
             }
         }
 
-        let mode = info.modes()[0];
+        let output_name = format!("{}-{}", info.interface().as_str(), info.interface_id());
+        let monitor_cfg = state.config.monitors.iter().find(|m| m.name == output_name);
+
+        let mode = monitor_cfg
+            .and_then(|cfg| info.modes().iter().min_by_key(|m| ((m.vrefresh() as f64 - cfg.refresh_rate).abs() as i64)))
+            .or_else(|| info.modes().first())
+            .copied()
+            .unwrap();
+
         let (mw, mh) = mode.size();
 
         let output = Output::new(
-            format!("{}-{}", info.interface().as_str(), info.interface_id()),
+            output_name,
             PhysicalProperties {
                 size: info.size()
                     .map(|(w, h)| (w as i32, h as i32).into())
@@ -105,19 +113,25 @@ fn open_gpu(
             size: (mw as i32, mh as i32).into(),
             refresh: mode.vrefresh() as i32 * 1000,
         };
+
+        let (pos_x, pos_y) = monitor_cfg.map(|cfg| (cfg.x, cfg.y)).unwrap_or((x_offset, 0));
+        let scale = monitor_cfg.map(|cfg| cfg.scale).unwrap_or(1.0);
+
         output.change_current_state(
             Some(wl_mode), 
             None, 
-            Some(Scale::Fractional(1.0)), 
-            Some((x_offset, 0).into())
+            Some(Scale::Fractional(scale)), 
+            Some((pos_x, pos_y).into())
         );
         output.set_preferred(wl_mode);
         output.create_global::<AeroWM>(&state.display_handle);
 
-        state.scale = output.current_scale().fractional_scale();
-        state.space.map_output(&output, (x_offset, 0));
-        state.per_output_state.insert(output.clone(), ViewportState { viewport_x: x_offset as f64, viewport_y: 0.0, zoom: 1.0 });
-        x_offset += mw as i32;
+        state.space.map_output(&output, (pos_x, pos_y));
+        state.per_output_state.insert(output.clone(), ViewportState { viewport_x: pos_x as f64, viewport_y: pos_y as f64, zoom: 1.0 });
+
+        if monitor_cfg.is_none() {
+            x_offset += mw as i32;
+        }
 
         for &encoder in info.encoders() {
             let encoder_info = drm.get_encoder(encoder).unwrap();
