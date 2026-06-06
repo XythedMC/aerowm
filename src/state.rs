@@ -1029,6 +1029,15 @@ impl AeroWM {
         }
         (0.0, 0.0, 1.0)
     }
+
+    pub fn cursor_to_canvas(&self) -> (f64, f64) {
+        let (vx, vy, zoom) = self.current_viewport();
+
+        let canvas_x = self.cursor_position.x / zoom + vx;
+        let canvas_y = self.cursor_position.y / zoom + vy;
+
+        (canvas_x, canvas_y)
+    }
     // -- Launch Apps --------------------------------
     pub fn launch_app(&mut self, name: &str) {
         let (x, y) = (self.cursor_position.x, self.cursor_position.y);
@@ -1112,13 +1121,14 @@ impl AeroWM {
     }
 
     pub fn sync_window_positions(&mut self) {
-        let zoom = self.zoom;
+        let (vx, vy, zoom) = self.current_viewport();
+
         let updates: Vec<(Window, i32, i32)> = self
             .windows
             .iter()
             .map(|cw| {
-                let sx = ((cw.canvas_x - self.current_viewport().0) * zoom) as i32;
-                let sy = ((cw.canvas_y - self.current_viewport().1) * zoom) as i32;
+                let sx = ((cw.canvas_x - vx) * zoom) as i32;
+                let sy = ((cw.canvas_y - vy) * zoom) as i32;
                 (cw.window.clone(), sx, sy)
             })
             .collect();

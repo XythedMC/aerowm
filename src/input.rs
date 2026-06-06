@@ -130,7 +130,7 @@ impl AeroWM {
                 let pointer = self.seat.get_pointer().expect("No pointer/mouse connected or found");
 
                 self.cursor_position += event.delta();
-                let (viewport_x, viewport_y, zoom) = self.current_viewport();
+                let (_, _, zoom) = self.current_viewport();
 
                 let (min_x, min_y, max_x, max_y) = self.space.outputs()
                     .filter_map(|o| self.space.output_geometry(o))
@@ -142,7 +142,6 @@ impl AeroWM {
                 self.cursor_position.y = self.cursor_position.y.clamp(min_y as f64, max_y as f64);
                 
                 if self.active_drag {
-                    let zoom = self.zoom;
                     let (id, _) = self.dragged_window.unwrap();
                     self.windows.iter_mut().find(|cw| cw.id == id)
                         .map(|cw| {
@@ -177,8 +176,7 @@ impl AeroWM {
                     pointer.current_location().y as i32, 
                 );
 
-                let canvas_cx = self.cursor_position.x / zoom + viewport_x;
-                let canvas_cy = self.cursor_position.y / zoom + viewport_y;
+                let (canvas_cx, canvas_cy) = self.cursor_to_canvas();
 
                 let Some(window) = self.windows.iter().find(|cw| {
                     (cw.canvas_x..(cw.canvas_x + cw.base_width as f64)).contains(&canvas_cx) &&
@@ -231,8 +229,8 @@ impl AeroWM {
                     return;
                 };
 
-                let local_x = self.cursor_position.x / zoom - (window.canvas_x - viewport_x);
-                let local_y = self.cursor_position.y / zoom - (window.canvas_y - viewport_y);
+                let local_x = canvas_cx - window.canvas_x;
+                let local_y = canvas_cy - window.canvas_y;
 
                 let local: Point<f64, Logical> = Point::new(local_x, local_y);
                 let Some((surf, p)) = window.window.surface_under(local, WindowSurfaceType::ALL) else {
@@ -264,6 +262,7 @@ impl AeroWM {
                         time: event.time_msec(),
                     },
                 );
+                self.sync_window_positions();
                 pointer.frame(self);
                 if let Some(window) = self.windows.iter().find(|cw| {
                     cw.window
@@ -325,11 +324,13 @@ impl AeroWM {
                 }
             }
             InputEvent::PointerButton { event, .. } => {
+                self.sync_window_positions();
                 let pointer = self.seat.get_pointer().expect("No pointer/mouse connected or found");
                 let keyboard = self.seat.get_keyboard().expect("Keyboard not found - this is a bug");
                 let under = self.surface_under(self.cursor_position);
 
                 let (viewport_x, viewport_y, zoom) = self.current_viewport();
+                let (cx, cy) = self.cursor_to_canvas();
 
                 let mods = keyboard.modifier_state();
                 let main_mod = match self.main_modifier {
@@ -362,10 +363,7 @@ impl AeroWM {
                 if ButtonState::Pressed == button_state && !pointer.is_grabbed()
                     && button == BTN_LEFT && self.marking_area.is_some() 
                 {
-                    let canvas_pos = Point::new(
-                        self.cursor_position.x / zoom + viewport_x,
-                        self.cursor_position.y / zoom + viewport_y
-                    );
+                    let canvas_pos = Point::new(cx, cy);
                     self.marking_area_start = Some(canvas_pos);
                     return;
                 }
@@ -374,10 +372,7 @@ impl AeroWM {
                 {
                     let id = self.marking_area.unwrap();
                     let start = self.marking_area_start.unwrap();
-                    let end: Point<f64, Logical> = Point::new(
-                        self.cursor_position.x / zoom + viewport_x,
-                        self.cursor_position.y / zoom + viewport_y,
-                    );
+                    let end: Point<f64, Logical> = Point::new(cx, cy);
                     let rect: Rectangle<f64, Logical> = Rectangle::from_extremities(
                         (start.x.min(end.x), start.y.min(end.y)), 
                         (start.x.max(end.x), start.y.max(end.y)),
@@ -388,22 +383,26 @@ impl AeroWM {
                     self.marking_area_start = None;
                     return;
                 }
-
+                eprintln!("button pressed: main_mod: {}, under {:?}", main_mod, under.is_some());
                 if ButtonState::Pressed == button_state && !pointer.is_grabbed()
-                    && button == BTN_LEFT && main_mod && !under.is_none()
+                    && button == BTN_LEFT && main_mod && under.is_some()
                 {
-                    let canvas_cx = self.cursor_position.x / zoom + viewport_x;
-                    let canvas_cy = self.cursor_position.y / zoom + viewport_y;
+                    eprintln!("drag attempt: cx={:.1} cy={:.1}", cx, cy);
+                    eprintln!("windows: {:?}", self.windows.iter().map(|w| (w.canvas_x, w.canvas_y, w.base_width,
+                    w.base_height)).collect::<Vec<_>>());
                     if let Some(window) = self.windows.iter().find(|cw| {
-                        (cw.canvas_x..(cw.canvas_x + cw.base_width as f64)).contains(&canvas_cx) &&
-                        (cw.canvas_y..(cw.canvas_y + cw.base_height as f64)).contains(&canvas_cy)
+                        (cw.canvas_x..(cw.canvas_x + cw.base_width as f64)).contains(&cx) &&
+                        (cw.canvas_y..(cw.canvas_y + cw.base_height as f64)).contains(&cy)
                     }) {
+                        eprintln!("drag started");
                         self.active_drag = true;
                         let offset: Point<f64, Logical> = Point::new(
                             pointer.current_location().x - window.canvas_x,
                             pointer.current_location().y - window.canvas_y,
                         );
                         self.dragged_window = Some((window.id, offset));
+                    } else {
+                        eprintln!("drag: now window hit");
                     }
                 }
                 if ButtonState::Released == button_state && self.active_drag {
@@ -563,12 +562,10 @@ impl AeroWM {
                         }
                     }            
                 } else if ButtonState::Pressed == button_state && !pointer.is_grabbed() && !self.active_drag {
-                    let canvas_cx = self.cursor_position.x / zoom + viewport_x;
-                    let canvas_cy = self.cursor_position.y / zoom + viewport_y;
 
                     let hit = self.windows.iter().find(|cw| {
-                        (cw.canvas_x..(cw.canvas_x + cw.base_width as f64)).contains(&canvas_cx) &&
-                        (cw.canvas_y..(cw.canvas_y + cw.base_height as f64)).contains(&canvas_cy)
+                        (cw.canvas_x..(cw.canvas_x + cw.base_width as f64)).contains(&cx) &&
+                        (cw.canvas_y..(cw.canvas_y + cw.base_height as f64)).contains(&cy)
                     });
 
                     if let Some(cw) = hit {
@@ -665,9 +662,6 @@ impl AeroWM {
                 let vertical_amount_discrete = event.amount_v120(Axis::Vertical);
 
                 if main_mod && self.view_mode == ViewMode::TreeView && vertical_amount != 0.0 {
-                    let pointer = self.seat.get_pointer().expect("No pointer/mouse connected or found");
-                    let pointer_loc = pointer.current_location();
-
                     if let Some(output) = self.output_under_cursor().cloned() {
                         if let Some(vs) = self.per_output_state.get_mut(&output) {
                             let old_zoom = vs.zoom;
@@ -676,8 +670,8 @@ impl AeroWM {
                             self.zoom = vs.zoom;
                             self.zoom_target = vs.zoom;
 
-                            vs.viewport_x += pointer_loc.x * (1.0 / old_zoom - 1.0 / vs.zoom);
-                            vs.viewport_y += pointer_loc.y * (1.0 / old_zoom - 1.0 / vs.zoom);
+                            vs.viewport_x += self.cursor_position.x * (1.0 / old_zoom - 1.0 / vs.zoom);
+                            vs.viewport_y += self.cursor_position.y * (1.0 / old_zoom - 1.0 / vs.zoom);
 
                             self.viewport_target_x = vs.viewport_x;
                             self.viewport_target_y = vs.viewport_y;
