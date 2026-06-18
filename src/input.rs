@@ -22,7 +22,7 @@ impl AeroWM {
         let ww = (cw.base_width as f64 * zoom) as i32;
         let wh = (cw.base_height as f64 * zoom) as i32;
         
-        let margin = (8.0 / zoom) as i32;
+        let margin = 8;
         let in_right  = px >= wx + ww  && px < wx + ww + margin && py >= wy - margin && py <= wy + wh + margin;
         let in_left   = px >= wx - 4*margin       && px < wx      && py >= wy - margin && py <= wy + wh + margin;
         let in_bottom = py >= wy + wh  && py < wy + wh + margin && px >= wx - margin && px <= wx + ww + margin;
@@ -596,7 +596,7 @@ impl AeroWM {
                                 })
                                 .map(|cw| cw.id);
                         }
-                        match self.view_mode {
+                        match self.current_view_mode() {
                             ViewMode::Tiling => {
                                 self.apply_layout();
                                 self.space.elements().for_each(|window| {
@@ -604,6 +604,7 @@ impl AeroWM {
                                 });
                             }
                             ViewMode::TreeView => {}
+                            ViewMode::Fullscreen => {}
                         }
                     } else if under.clone().is_some() && 
                         self.layer_surfaces.iter().any(|s| s.wl_surface() == &under.as_ref().unwrap().0) 
@@ -625,7 +626,7 @@ impl AeroWM {
                             keyboard.set_focus(self, Option::<WlSurface>::None, serial);
                             self.focused_window_id = None;
                         }
-                        if self.view_mode == ViewMode::Tiling {
+                        if self.current_view_mode() == ViewMode::Tiling {
                             self.apply_layout();
                         }
                     }
@@ -661,7 +662,7 @@ impl AeroWM {
                 let horizontal_amount_discrete = event.amount_v120(Axis::Horizontal);
                 let vertical_amount_discrete = event.amount_v120(Axis::Vertical);
 
-                if main_mod && self.view_mode == ViewMode::TreeView && vertical_amount != 0.0 {
+                if main_mod && self.current_view_mode() == ViewMode::TreeView && vertical_amount != 0.0 {
                     if let Some(output) = self.output_under_cursor().cloned() {
                         if let Some(vs) = self.per_output_state.get_mut(&output) {
                             let old_zoom = vs.zoom;

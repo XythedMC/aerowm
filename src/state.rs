@@ -47,7 +47,12 @@ use smithay::{
 
 use tokio::sync::broadcast::Sender;
 use xcursor::{CursorTheme, parser::parse_xcursor};
-use crate::{handlers::config::{AeroWMConfig, read_config}, keybind::ParsedKeybind, rendering::build_render_elements};
+use crate::{
+    handlers::config::{AeroWMConfig, read_config}, 
+    keybind::ParsedKeybind, 
+    rendering::build_render_elements,
+    ipc::{IpcEvent, InternalCommand, TreeWindow, TreeViewport, TreeResponse, AreasResponse, MonitorsResponse, MonitorInfo},
+};
 use image::ImageReader;
 
 smithay::backend::renderer::element::render_elements! {
@@ -64,6 +69,7 @@ pub enum ViewMode {
     #[default]
     Tiling,
     TreeView,
+    Fullscreen,
 }
 #[derive(Clone, Copy, Debug)]
 pub enum ModifierKey {
@@ -102,10 +108,12 @@ pub struct BackendData {
     pub udev_token: RegistrationToken,
 }
 
+#[derive(Clone, Default)]
 pub struct ViewportState {
     pub viewport_x: f64,
     pub viewport_y: f64,
     pub zoom: f64,
+    pub view_mode: ViewMode,
 }
 
 /// A window with its position on the infinite canvas and its place in the window tree.
@@ -195,10 +203,11 @@ pub struct AeroWM {
     pub tiling_visible_ids: Vec<u32>,
 
     // Viewing
-    pub view_mode: ViewMode,
     pub zoom: f64,
     pub gap: f64,
     pub scale: f64,
+
+    pub pre_fullscreen_viewport: Option<ViewportState>,
 
     pub config: AeroWMConfig,
 
@@ -247,7 +256,7 @@ pub struct AeroWM {
     pub seat: Seat<Self>,
 
     // IPC
-    pub event_tx: Option<Sender<crate::ipc::IpcEvent>>,
+    pub event_tx: Option<Sender<IpcEvent>>,
 
     // Xwayland
     pub xwayland: Option<RegistrationToken>,
@@ -336,12 +345,12 @@ impl AeroWM {
             zoom_animating: false,
             pinch_last_scale: 1.0,
             scale: 1.0,
+            pre_fullscreen_viewport: None, 
             anim_start: None,
             next_window_id: 0,
             z_counter: 0,
             focused_window_id: None,
             tiling_root_id: None,
-            view_mode: ViewMode::Tiling,
             zoom: 1.0,
             gap: config.gap,
             config,
@@ -484,7 +493,7 @@ impl AeroWM {
     pub fn focus_by_id(&mut self, id: u32) {
         if self.focused_window_id != Some(id) {
             self.focused_window_id = Some(id);
-            self.emit_event(crate::ipc::IpcEvent::FocusChanged { id: Some(id.to_string()) });
+            self.emit_event(IpcEvent::FocusChanged { id: Some(id.to_string()) });
         }
         let serial = SERIAL_COUNTER.next_serial();
         let surface = self
@@ -510,7 +519,7 @@ impl AeroWM {
     pub fn focus_clear(&mut self) {
         if self.focused_window_id.is_some() {
             self.focused_window_id = None;
-            self.emit_event(crate::ipc::IpcEvent::FocusChanged { id: None });
+            self.emit_event(IpcEvent::FocusChanged { id: None });
         }
         let serial = SERIAL_COUNTER.next_serial();
         let keyboard = self.seat.get_keyboard().expect("Keyboard not found - this is a bug");
@@ -547,71 +556,117 @@ impl AeroWM {
     // - Layout ------------------------------
 
     pub fn apply_layout(&mut self) {
-        match self.view_mode {
+        match self.current_view_mode() {
             ViewMode::Tiling => self.layout_tiling(),
             ViewMode::TreeView => self.layout_tree(),
+            ViewMode::Fullscreen => {},
         }
-        self.emit_event(crate::ipc::IpcEvent::LayoutChanged);
+        self.emit_event(IpcEvent::LayoutChanged);
     }
 
     fn output_size(&self) -> (f64, f64) {
-        let (w, h) = self.space
-            .outputs()
-            .next()
+        self.output_under_cursor()
             .and_then(|o| self.space.output_geometry(o))
             .map(|g| (g.size.w as f64, g.size.h as f64))
-            .unwrap_or((1920.0, 1080.0));
-        
-        if w <= 0.0 || h <= 0.0 {
-            (800.0, 600.0)
-        } else {
-            (w, h)
-        }
+            .unwrap_or((1920.0, 1080.0))
     }
 
-    pub fn toggle_fullscreen(&mut self) {
+    pub fn layout_fullscreen(&mut self) {
+        let Some(output) = self.output_under_cursor().cloned() else { return };
         let (sw, sh) = self.output_size();
-        let cw = self
-            .windows
-            .iter_mut()
-            .find(|cw| Some(cw.id) == self.focused_window_id);
+
+        let fid = self.focused_window_id;
+        let entering = self.windows.iter().find(|cw| Some(cw.id) == fid).map(|cw| !cw.is_fullscreen).unwrap_or(false);
+        if entering {
+            self.pre_fullscreen_viewport = Some(self.per_output_state.get(&output).unwrap().clone());
+        }
+
+        let Some(vs) = self.per_output_state.get_mut(&output) else { return; };
+        let cw = self.windows.iter_mut().find(|cw| Some(cw.id) == fid);
         if let Some(window) = cw {
-            if window.is_fullscreen == false {
-                window.pre_fullscreen_x = window.canvas_x;                                                                            
-                window.pre_fullscreen_y = window.canvas_y;                                                                            
-                window.pre_fullscreen_width = window.base_width;                                                                      
+            if !window.is_fullscreen {
+                // Save state
+                window.pre_fullscreen_x = window.canvas_x;
+                window.pre_fullscreen_y = window.canvas_y;
+                window.pre_fullscreen_width = window.base_width;
                 window.pre_fullscreen_height = window.base_height;
-                
-                (window.target_x, window.target_y) = (self.viewport_x, self.viewport_y);
-                (window.base_width, window.base_height) = (sw as i32, sh as i32);
+
+                // Size at zoom=1 so the client gets native pixels
+                let canvas_w = sw as i32;
+                let canvas_h = sh as i32;
+
+                window.canvas_x = vs.viewport_x;
+                window.canvas_y = vs.viewport_y;
+                window.target_x = vs.viewport_x;
+                window.target_y = vs.viewport_y;
+                window.anim_start_x = vs.viewport_x;
+                window.anim_start_y = vs.viewport_y;
+                window.base_width = canvas_w;
+                window.base_height = canvas_h;
 
                 if let Some(tl) = window.window.toplevel() {
-                    tl.with_pending_state(|s| s.size = Some((sw as i32, sh as i32).into()));
+                    tl.with_pending_state(|s| s.size = Some((canvas_w, canvas_h).into()));
                     tl.send_pending_configure();
                 } else if let Some(x11) = window.window.x11_surface() {
-                    let _ = x11.configure(Rectangle {
-                        loc: (0,0).into(),
-                        size: (sw as i32, sh as i32).into()
+                    let _ = x11.configure(Rectangle { 
+                        loc: (0,0).into(), 
+                        size: (window.base_width, window.base_height).into()
                     });
                     let _ = x11.set_fullscreen(true);
-                }
+                }   
                 window.is_fullscreen = true;
+                vs.view_mode = ViewMode::Fullscreen;
+                
+                // Snap viewport to zoom=1 so the window fills the screen exactly
+                self.viewport_x = vs.viewport_x;
+                self.viewport_y = vs.viewport_y;
+                self.viewport_target_x = vs.viewport_x;
+                self.viewport_target_y = vs.viewport_y;
+                self.viewport_anim_start_x = vs.viewport_x;
+                self.viewport_anim_start_y = vs.viewport_y;
+                self.zoom = 1.0;
+                self.zoom_target = 1.0;
+                self.zoom_anim_start = 1.0;
+                vs.zoom = 1.0;
             } else {
-                window.canvas_x = window.pre_fullscreen_x;                                                                            
-                window.canvas_y = window.pre_fullscreen_y;                                                                            
-                window.base_width = window.pre_fullscreen_width;                                                                      
-                window.base_height = window.pre_fullscreen_height;
+                // Restore window state
+                let rx = window.pre_fullscreen_x;
+                let ry = window.pre_fullscreen_y;
+                let rw = window.pre_fullscreen_width;
+                let rh = window.pre_fullscreen_height;
+                window.canvas_x = rx;
+                window.canvas_y = ry;
+                window.target_x = rx;
+                window.target_y = ry;
+                window.anim_start_x = rx;
+                window.anim_start_y = ry;
+                window.base_width = rw;
+                window.base_height = rh;
+
                 if let Some(tl) = window.window.toplevel() {
-                    tl.with_pending_state(|s| s.size = Some((window.pre_fullscreen_width, window.pre_fullscreen_height).into()));
+                    tl.with_pending_state(|s| s.size = Some((rw, rh).into()));
                     tl.send_pending_configure();
                 } else if let Some(x11) = window.window.x11_surface() {
-                    let _ = x11.configure(Rectangle {
-                        loc: (0,0).into(),
-                        size: (window.pre_fullscreen_width, window.pre_fullscreen_height).into(),
-                    });
+                    let _ = x11.configure(Rectangle { loc: (0,0).into(), size: (rw, rh).into() });
                     let _ = x11.set_fullscreen(false);
-                }
+                }   
                 window.is_fullscreen = false;
+
+                // Restore viewport and zoom
+                let vp = self.pre_fullscreen_viewport.clone().unwrap();
+                self.viewport_x = vp.viewport_x;
+                self.viewport_y = vp.viewport_y;
+                self.viewport_target_x = vp.viewport_x;
+                self.viewport_target_y = vp.viewport_y;
+                self.viewport_anim_start_x = vp.viewport_x;
+                self.viewport_anim_start_y = vp.viewport_y;
+                self.zoom = vp.zoom;
+                self.zoom_target = vp.zoom;
+                self.zoom_anim_start = vp.zoom;
+                vs.viewport_x = vp.viewport_x;
+                vs.viewport_y = vp.viewport_y;
+                vs.zoom = vp.zoom;
+                vs.view_mode = vp.view_mode;
             }
         }
     }
@@ -632,16 +687,16 @@ impl AeroWM {
             .iter()
             .map(|(&id, &(_, _, sw, sh))| (id, sw as i32, sh as i32))
             .collect();
-        for (id, sw, sh) in resize_ops {                                                                                                               
-            if let Some(cw) = self.windows.iter_mut().find(|cw| cw.id == id) {                                                                         
-                cw.base_width = sw - 2 * self.config.tile_distance;                                                                                                                    
-                cw.base_height = sh - 2 * self.config.tile_distance;                                                                                                                   
+        for (id, sw, sh) in resize_ops {
+            if let Some(cw) = self.windows.iter_mut().find(|cw| cw.id == id) {
+                cw.base_width = sw - 2 * self.config.tile_distance;
+                cw.base_height = sh - 2 * self.config.tile_distance;
                 if let Some(tl) = cw.window.toplevel() {
-                    tl.with_pending_state(|s| { s.size = Some((cw.base_width, cw.base_height).into()); });                                                                    
-                    tl.send_pending_configure();                                                                                                       
+                    tl.with_pending_state(|s| { s.size = Some((cw.base_width, cw.base_height).into()); });
+                    tl.send_pending_configure();
                 }
-            }                                                                                                                                          
-        }  
+            }
+        }
 
         // Set animation targets.
         for cw in &mut self.windows {
@@ -831,7 +886,6 @@ impl AeroWM {
 
                 let gpu_data = self.gpu.get_mut(&device_id).unwrap();
                 let output = gpu_data.crtc_to_output.get(&handle);
-                eprintln!("{:?}", handle);
                 let Some(compositor) = gpu_data.compositors.get_mut(&handle) else { return; };
 
                 compositor.frame_submitted().ok();
@@ -916,7 +970,7 @@ impl AeroWM {
                     &self.windows,
                     &self.x11_override_redirect,
                     &self.space,
-                    self.view_mode,
+                    vs.view_mode,
                     &self.tiling_visible_ids,
                     self.scale,
                     vs.zoom,
@@ -1030,6 +1084,15 @@ impl AeroWM {
         (0.0, 0.0, 1.0)
     }
 
+    pub fn current_view_mode(&self) -> ViewMode {
+        if let Some(output) = self.output_under_cursor() {
+            if let Some(vs) = self.per_output_state.get(output) {
+                return vs.view_mode;
+            }
+        }
+        ViewMode::Tiling
+    }
+
     pub fn cursor_to_canvas(&self) -> (f64, f64) {
         let (vx, vy, zoom) = self.current_viewport();
 
@@ -1117,7 +1180,7 @@ impl AeroWM {
         self.viewport_anim_start_x = self.viewport_x;
         self.viewport_anim_start_y = self.viewport_y;
         self.sync_window_positions();
-        self.emit_event(crate::ipc::IpcEvent::ViewportChanged { x: self.viewport_x, y: self.viewport_y });
+        self.emit_event(IpcEvent::ViewportChanged { x: self.viewport_x, y: self.viewport_y });
     }
 
     pub fn sync_window_positions(&mut self) {
@@ -1298,17 +1361,13 @@ impl AeroWM {
     }
 
     // - IPC -------------------------------─
-    pub fn emit_event(&self, event: crate::ipc::IpcEvent) {
+    pub fn emit_event(&self, event: IpcEvent) {
         if let Some(tx) = &self.event_tx {
             let _ = tx.send(event);
         }
     }
 
-    pub fn handle_ipc_cmd(&mut self, cmd: crate::ipc::InternalCommand) {
-        use crate::ipc::{
-            InternalCommand, TreeWindow, TreeViewport, TreeResponse, 
-            AreasResponse, MonitorsResponse, MonitorInfo, IpcEvent
-        };
+    pub fn handle_ipc_cmd(&mut self, cmd: InternalCommand) {
         match cmd {
             InternalCommand::GetTree { reply_to } => {
                 let windows = self.windows.iter().map(|cw| {
@@ -1335,9 +1394,10 @@ impl AeroWM {
                         focused: self.focused_window_id == Some(cw.id),
                     }
                 }).collect();
-                let mode = match self.view_mode {
+                let mode = match self.current_view_mode() {
                     ViewMode::Tiling => "tiling".to_string(),
                     ViewMode::TreeView => "tree".to_string(),
+                    ViewMode::Fullscreen => "fullscreen".to_string(),
                 };
                 let resp = TreeResponse {
                     windows,
@@ -1350,9 +1410,10 @@ impl AeroWM {
                 if let Ok(id) = id.parse::<u32>() {
                     self.focus_by_id(id);
                     self.tiling_root_id = Some(id);
-                    match self.view_mode {
+                    match self.current_view_mode() {
                         ViewMode::Tiling => self.apply_layout(),
                         ViewMode::TreeView => self.center_viewport_on_focused(),
+                        ViewMode::Fullscreen => {},
                     }
                 }
             }
@@ -1371,17 +1432,18 @@ impl AeroWM {
                 } else {
                     return;
                 };
-                if self.view_mode != new_mode {
-                    self.view_mode = new_mode;
-                    if new_mode == ViewMode::Tiling {
-                        self.tiling_root_id = self.focused_window_id;
-                        self.zoom = 1.0;
-                        if let Some(output) = self.space.outputs().next() {
+                if self.current_view_mode() != new_mode {
+                    if let Some(output) = self.output_under_cursor().cloned() {
+                        let Some(vs) = self.per_output_state.get_mut(&output) else { return; };
+                        vs.view_mode = new_mode;
+                        if new_mode == ViewMode::Tiling {
+                            self.tiling_root_id = self.focused_window_id;
+                            self.zoom = 1.0;
                             output.change_current_state(None, None, Some(smithay::output::Scale::Fractional(self.zoom)), None);
                         }
+                        self.apply_layout();
+                        self.emit_event(IpcEvent::ModeChanged { mode: mode.clone() });
                     }
-                    self.apply_layout();
-                    self.emit_event(IpcEvent::ModeChanged { mode: mode.clone() });
                 }
             }
             InternalCommand::Launch { command } => self.launch_app(&command),

@@ -30,7 +30,7 @@ pub enum Action {
     Exec(String),
     Quit,
     SwitchView,
-    Fullscreen, 
+    Fullscreen,
     Parent,
     Child,
     Sibling,
@@ -135,11 +135,11 @@ impl AeroWM {
                 self.pending_screenshot = true;
             },
             Action::SwitchView => self.switch_view(),
-            Action::Fullscreen => self.toggle_fullscreen(),
+            Action::Fullscreen => self.fullscreen(),
             Action::Parent => self.focus_parent(),
             Action::Child => self.focus_child(),
             Action::Sibling => self.focus_sibling(),
-            Action::FocusZoom => if self.view_mode == ViewMode::TreeView { self.focus_zoom(); } else {},
+            Action::FocusZoom => if self.current_view_mode() == ViewMode::TreeView { self.focus_zoom(); } else {},
             Action::ResetView => self.reset_view(),
             Action::Pan(x, y) => self.pan(*x, *y),
             Action::Resize(x, y) => self.resize_focused(*x, *y),
@@ -157,7 +157,7 @@ impl AeroWM {
     }
 
     fn reset_view(&mut self) {
-        if self.view_mode == ViewMode::Tiling {
+        if self.current_view_mode() == ViewMode::Tiling {
             self.viewport_target_x = 0.0;
             self.viewport_target_y = 0.0;
             self.viewport_x = 0.0;
@@ -223,29 +223,46 @@ impl AeroWM {
         self.current_area = Some(n);
     }
 
-    fn switch_view(&mut self) {
-        self.view_mode = match self.view_mode {
-            ViewMode::Tiling => {
-                self.zoom = 1.0;
-                self.zoom_target = 1.0;
-                self.zoom_anim_start = 1.0;
-                ViewMode::TreeView
-            },
-            ViewMode::TreeView => {
-                for cw in &mut self.windows {
-                    cw.tree_x = Some(cw.canvas_x);
-                    cw.tree_y = Some(cw.canvas_y);
-                }
-                self.zoom = 1.0;
-                self.zoom_target = 1.0;
-                self.zoom_anim_start = 1.0;
-                ViewMode::Tiling
-            }
-        };
-        self.apply_layout();
-        let mode_str = match self.view_mode {
+    fn fullscreen(&mut self) {
+        self.layout_fullscreen();
+        let mode_str = match self.current_view_mode() {
             ViewMode::Tiling => "tiling".to_string(),
             ViewMode::TreeView => "tree".to_string(),
+            ViewMode::Fullscreen => "fullscreen".to_string(),
+        };
+        self.emit_event(crate::ipc::IpcEvent::ModeChanged { mode: mode_str });
+    }
+
+    fn switch_view(&mut self) {
+        let current_view_mode = self.current_view_mode();
+        if let Some(output) = self.output_under_cursor().cloned() {
+            if let Some(vs) = self.per_output_state.get_mut(&output) {
+                vs.view_mode = match current_view_mode {
+                    ViewMode::Tiling => {
+                        self.zoom = 1.0;
+                        self.zoom_target = 1.0;
+                        self.zoom_anim_start = 1.0;
+                        ViewMode::TreeView
+                    },
+                    ViewMode::TreeView => {
+                        for cw in &mut self.windows {
+                            cw.tree_x = Some(cw.canvas_x);
+                            cw.tree_y = Some(cw.canvas_y);
+                        }
+                        self.zoom = 1.0;
+                        self.zoom_target = 1.0;
+                        self.zoom_anim_start = 1.0;
+                        ViewMode::Tiling
+                    },
+                    ViewMode::Fullscreen => { return; },
+                }
+            }
+        }
+        self.apply_layout();
+        let mode_str = match self.current_view_mode() {
+            ViewMode::Tiling => "tiling".to_string(),
+            ViewMode::TreeView => "tree".to_string(),
+            ViewMode::Fullscreen => "fullscreen".to_string(),
         };
         self.emit_event(crate::ipc::IpcEvent::ModeChanged { mode: mode_str });
     }
@@ -260,9 +277,10 @@ impl AeroWM {
         if let Some(target_id) = pending_tree_focus {
             self.focus_by_id(target_id);
             self.tiling_root_id = Some(target_id);
-            match self.view_mode {
+            match self.current_view_mode() {
                 ViewMode::Tiling => self.apply_layout(),
                 ViewMode::TreeView => self.center_viewport_on_focused(),
+                ViewMode::Fullscreen => {},
             }
         }
     }
@@ -277,9 +295,10 @@ impl AeroWM {
         if let Some(target_id) = pending_tree_focus {
             self.focus_by_id(target_id);
             self.tiling_root_id = Some(target_id);
-            match self.view_mode {
+            match self.current_view_mode() {
                 ViewMode::Tiling => self.apply_layout(),
                 ViewMode::TreeView => self.center_viewport_on_focused(),
+                ViewMode::Fullscreen => {},
             }
         }
     }
@@ -300,9 +319,10 @@ impl AeroWM {
         if let Some(target_id) = pending_tree_focus {
             self.focus_by_id(target_id);
             self.tiling_root_id = Some(target_id);
-            match self.view_mode {
+            match self.current_view_mode() {
                 ViewMode::Tiling => self.apply_layout(),
                 ViewMode::TreeView => self.center_viewport_on_focused(),
+                ViewMode::Fullscreen => {},
             }
         }
     }

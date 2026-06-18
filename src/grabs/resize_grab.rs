@@ -56,12 +56,26 @@ impl PointerGrab<AeroWM> for ResizeSurfaceGrab {
         let now = std::time::Instant::now();
         let should_update = now.duration_since(self.last_update).as_millis() >= 16;
 
+        let shifts_left = matches!(self.grabbed_edge, ResizeEdge::Left | ResizeEdge::BottomLeft | ResizeEdge::TopLeft);
+        let shifts_top = matches!(self.grabbed_edge, ResizeEdge::Top | ResizeEdge::TopLeft | ResizeEdge::TopRight);
+
         if let Some(cw) = data.windows.iter_mut().find(|cw| cw.id == self.window_id) {
             if cw.base_width != new_width || cw.base_height != new_height {
                 cw.base_width  = new_width;
                 cw.base_height = new_height;
                 cw.tree_width  = new_width;
                 cw.tree_height = new_height;
+
+                if shifts_left {
+                    cw.canvas_x = cw.resize_initial_x + (cw.resize_initial_w - new_width) as f64;
+                    cw.target_x = cw.canvas_x;
+                    cw.anim_start_x = cw.canvas_x;
+                }
+                if shifts_top {
+                    cw.canvas_y = cw.resize_initial_y + (cw.resize_initial_h - new_height) as f64;
+                    cw.target_y = cw.canvas_y;
+                    cw.anim_start_y = cw.canvas_y;
+                }
                 if should_update {
                     if let Some(tl) = cw.window.toplevel() {
                         tl.with_pending_state(|s| { s.size = Some((new_width, new_height).into()); });

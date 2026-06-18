@@ -8,7 +8,7 @@ use smithay::{
     }, desktop::{Window, layer_map_for_output}, input::pointer::{CursorIcon, CursorImageStatus}, output::{Mode, Output, PhysicalProperties, Subpixel}, reexports::calloop::EventLoop, utils::{Rectangle, Transform}
 };
 
-use crate::{AeroWM, state::{BackgroundType, AeroWMElement}, rendering};
+use crate::{AeroWM, rendering, state::{AeroWMElement, BackgroundType, ViewportState}};
 
 // ── Shader sources ─────────────────────────────────────────────────────────────
 // compile_custom_pixel_shader prepends "#version 100\n" — do NOT include it here.
@@ -50,6 +50,7 @@ pub fn init_winit(
     output.set_preferred(mode);
 
     state.space.map_output(&output, (0, 0));
+    state.per_output_state.insert(output.clone(), ViewportState::default());
 
     let mut damage_tracker = OutputDamageTracker::from_output(&output);
 
@@ -112,12 +113,12 @@ pub fn init_winit(
 
                         let background_color = state.config.background_color;
                         let color = background_color.map(|x| x as f32 / 255.0);
-                        
+                        let Some(vs) = state.per_output_state.get(&output) else { return; };
                         let overlays = rendering::build_render_elements(
                             &state.windows,
                             &state.x11_override_redirect,
                             &state.space,
-                            state.view_mode,
+                            vs.view_mode,
                             &state.tiling_visible_ids,
                             state.scale,
                             state.zoom,

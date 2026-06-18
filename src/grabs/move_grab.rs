@@ -11,7 +11,7 @@ use smithay::{
     utils::{Logical, Point},
 };
 
-use crate::AeroWM;
+use crate::{AeroWM, state::ViewMode};
 
 pub struct MoveSurfaceGrab {
     pub start_data: PointerGrabStartData<AeroWM>,
@@ -39,6 +39,7 @@ impl PointerGrab<AeroWM> for MoveSurfaceGrab {
 
         let new_canvas_x = self.initial_canvas_x + delta.x / zoom;
         let new_canvas_y = self.initial_canvas_y + delta.y / zoom;
+        let output = data.output_under_cursor().cloned();
 
         // Keep canvas coordinates in sync so panning still works correctly.
         for cw in data.windows.iter_mut() {
@@ -52,9 +53,13 @@ impl PointerGrab<AeroWM> for MoveSurfaceGrab {
                 cw.target_y = new_canvas_y;
                 cw.anim_start_x = new_canvas_x;
                 cw.anim_start_y = new_canvas_y;
-                if data.view_mode == crate::state::ViewMode::TreeView {
-                    cw.tree_x = Some(new_canvas_x);
-                    cw.tree_y = Some(new_canvas_y);
+                if let Some(output) = output {
+                    if let Some(vs) = data.per_output_state.get(&output) {
+                        if vs.view_mode == ViewMode::TreeView {
+                            cw.tree_x = Some(new_canvas_x);
+                            cw.tree_y = Some(new_canvas_y);
+                        }
+                    }
                 }
                 break;
             }

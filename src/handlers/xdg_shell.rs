@@ -100,7 +100,7 @@ impl XdgShellHandler for AeroWM {
         self.print_tree();
         // In tree view, other windows are free-form — don't reposition them for a new window.
         // The new window is already placed at viewport center above.
-        if self.view_mode == ViewMode::Tiling {
+        if self.current_view_mode() == ViewMode::Tiling {
             self.apply_layout();
         } 
     }
@@ -165,7 +165,7 @@ impl XdgShellHandler for AeroWM {
         }
 
         self.print_tree();
-        if self.view_mode == ViewMode::Tiling {
+        if self.current_view_mode() == ViewMode::Tiling {
             self.apply_layout();
         }
     }
@@ -223,7 +223,6 @@ impl XdgShellHandler for AeroWM {
         serial: Serial,
         edges: smithay::reexports::wayland_protocols::xdg::shell::server::xdg_toplevel::ResizeEdge,
     ) {
-        println!("resize_request called");
         let seat = Seat::from_resource(&seat).unwrap();
         let wl_surface = surface.wl_surface();
 

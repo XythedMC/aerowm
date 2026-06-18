@@ -216,6 +216,7 @@ pub fn indicator_element(view_mode: ViewMode, prog: &GlesPixelProgram) -> PixelS
     let color: (f32, f32, f32, f32) = match view_mode {
         ViewMode::Tiling   => (0.25, 0.85, 0.45, 0.85), // green
         ViewMode::TreeView => (0.35, 0.60, 1.00, 0.85), // blue
+        ViewMode::Fullscreen => (1.00, 0.25, 0.25, 0.85),
     };
     let area = Rectangle {
         loc: (12, 12).into(),
@@ -308,6 +309,7 @@ pub fn build_render_elements(
 
     for window in sorted_windows {
         if view_mode == ViewMode::Tiling && !tiling_visible_ids.contains(&window.id) {continue;}
+        if view_mode == ViewMode::Fullscreen && !window.is_fullscreen { continue; }
         
         let sx = ((window.canvas_x - viewport_x) * zoom) as i32;
         let sy = ((window.canvas_y - viewport_y) * zoom) as i32;
