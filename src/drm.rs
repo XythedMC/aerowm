@@ -127,7 +127,13 @@ fn open_gpu(
         output.create_global::<AeroWM>(&state.display_handle);
 
         state.space.map_output(&output, (pos_x, pos_y));
-        state.per_output_state.insert(output.clone(), ViewportState { viewport_x: pos_x as f64, viewport_y: pos_y as f64, zoom: 1.0, view_mode: ViewMode::Tiling });
+        state.per_output_state.insert(output.clone(), ViewportState { 
+            viewport_x: pos_x as f64, 
+            viewport_y: pos_y as f64, 
+            zoom: 1.0, 
+            view_mode: ViewMode::Tiling, 
+            tiling_visible_ids: Vec::new(),
+        });
 
         if monitor_cfg.is_none() {
             x_offset += mw as i32;

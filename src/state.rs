@@ -1,5 +1,5 @@
 use std::{
-    collections::HashMap, 
+    collections::{HashMap, HashSet}, 
     env::set_var, 
     ffi::OsString, 
     iter::empty, 
@@ -114,6 +114,7 @@ pub struct ViewportState {
     pub viewport_y: f64,
     pub zoom: f64,
     pub view_mode: ViewMode,
+    pub tiling_visible_ids: Vec<u32>,
 }
 
 /// A window with its position on the infinite canvas and its place in the window tree.
@@ -159,6 +160,8 @@ pub struct CanvasWindow {
 
     pub z_index: u32,
     pub needs_center: bool,
+
+    pub output_name: Option<String>,
 }
 
 pub struct AeroWM {
@@ -200,7 +203,6 @@ pub struct AeroWM {
     pub next_window_id: u32,
     pub focused_window_id: Option<u32>,
     pub tiling_root_id: Option<u32>,
-    pub tiling_visible_ids: Vec<u32>,
 
     // Viewing
     pub zoom: f64,
@@ -211,6 +213,7 @@ pub struct AeroWM {
 
     pub config: AeroWMConfig,
 
+    // Areas
     pub areas: HashMap<u32, Rectangle<f64, Logical>>,
     pub marking_area: Option<u32>,
     pub marking_area_start: Option<Point<f64, Logical>>,
@@ -267,6 +270,7 @@ pub struct AeroWM {
     pub x11_override_redirect: Vec<Window>,
 
     pub main_modifier: ModifierKey,
+
     /// DMABuf buffers waiting to be imported by the renderer on the next frame.
     pub pending_dmabufs: Vec<(Dmabuf, ImportNotifier)>,
     pub pending_screenshot: bool,
@@ -310,7 +314,6 @@ impl AeroWM {
         };
         let cursor_icon = CursorImageStatus::default_named();
         let layer_surfaces = Vec::new();
-        let visible_ids: Vec<u32> = Vec::new();
 
         let background_type = match config.background_type.as_str() {
             "color" => BackgroundType::Color,
@@ -373,7 +376,6 @@ impl AeroWM {
             layer_surfaces,
             x11_override_redirect: Vec::new(),
             background_type,
-            tiling_visible_ids: visible_ids,
             socket_name,
             compositor_state,
             xdg_shell_state,
@@ -571,6 +573,50 @@ impl AeroWM {
             .unwrap_or((1920.0, 1080.0))
     }
 
+    pub fn move_to_next_output(&mut self) {
+        let outputs: Vec<Output> = self.space.outputs().cloned().collect();
+        if outputs.len() <= 1 { return; };
+
+        let Some(current_output) = self.output_under_cursor() else { return; };
+        let index = outputs.iter().position(|o| o == current_output).unwrap();
+        let next_index = (index + 1) % outputs.len();
+        let next_output = outputs[next_index].clone();
+
+        let Some(focused_window_id) = self.focused_window_id else { return; };
+        let parent_id = self.windows.iter().find(|cw| cw.id == focused_window_id).and_then(|cw| cw.parent_id);
+        
+        // Detach the focused window from the parent
+        if let Some(pid) = parent_id {
+            if let Some(parent) = self.windows.iter_mut().find(|cw| cw.id == pid) {
+                parent.children.retain(|&id| id != focused_window_id);
+            }
+        }
+        if let Some(w) = self.windows.iter_mut().find(|cw| cw.id == focused_window_id) {
+            w.parent_id = None;
+        }
+
+        // Move the focused window's subtree to the next output
+        let subtree = self.collect_subtree(focused_window_id);
+        for window_id in subtree {
+            let Some(window) = self.windows.iter_mut().find(|cw| cw.id == window_id) else { continue; };
+            window.output_name = Some(next_output.name());
+        }
+        self.apply_layout();
+    }
+
+    fn collect_subtree(&self, id: u32) -> Vec<u32> {
+        let mut result = vec![id];
+        let Some(children) = self.windows.iter()
+            .find(|w| w.id == id)
+            .map(|w| w.children.clone()
+        ) else { return result; };
+
+        for child in children {
+            result.extend(self.collect_subtree(child))
+        }
+        result
+    }
+
     pub fn layout_fullscreen(&mut self) {
         let Some(output) = self.output_under_cursor().cloned() else { return };
         let (sw, sh) = self.output_size();
@@ -672,12 +718,30 @@ impl AeroWM {
     }
 
     fn layout_tiling(&mut self) {
-        let Some(tiling_root) = self.tiling_root_id.or(self.focused_window_id) else { return };
+        let Some(output) = self.output_under_cursor() else { return; };
+        let current_output_name = Some(output.name());
+        
+        let Some(tiling_root) = self.tiling_root_id
+            .or(self.focused_window_id)
+            .filter(|&id| {
+                self.windows.iter()
+                    .find(|w| w.id == id)
+                    .map(|w| w.output_name == current_output_name)
+                    .unwrap_or(false)
+            })
+            .or_else(|| {
+                self.windows.iter()
+                    .find(|w| w.parent_id.is_none() && w.output_name == current_output_name)
+                    .map(|w| w.id)
+            }) else { return; };
+        
         let (w, h) = self.output_size();
 
         let mut slots = HashMap::new();
         self.layout_node_bsp(tiling_root, (0.0, 0.0, w, h), &mut slots);
-        self.tiling_visible_ids = slots.keys().copied().collect();
+        if let Some(vs) = self.per_output_state.get_mut(&output.clone()) {
+            vs.tiling_visible_ids = slots.keys().copied().collect();
+        }
 
         self.viewport_target_x = 0.0;
         self.viewport_target_y = 0.0;
@@ -687,6 +751,7 @@ impl AeroWM {
             .iter()
             .map(|(&id, &(_, _, sw, sh))| (id, sw as i32, sh as i32))
             .collect();
+
         for (id, sw, sh) in resize_ops {
             if let Some(cw) = self.windows.iter_mut().find(|cw| cw.id == id) {
                 cw.base_width = sw - 2 * self.config.tile_distance;
@@ -703,7 +768,7 @@ impl AeroWM {
             if let Some(&(tx, ty, _, _)) = slots.get(&cw.id) {
                 cw.target_x = tx + self.config.tile_distance as f64;
                 cw.target_y = ty + self.config.tile_distance as f64;
-            } else {
+            } else if cw.output_name == current_output_name {
                 self.space.unmap_elem(&cw.window);
             }
         }
@@ -751,11 +816,12 @@ impl AeroWM {
         const WIN_W: f64 = 800.0;
 
         let widths = self.compute_subtree_widths();
+        let current_output_name = self.output_under_cursor().map(|o| o.name());
 
         let roots: Vec<u32> = self
             .windows
             .iter()
-            .filter(|cw| cw.parent_id.is_none())
+            .filter(|cw| cw.parent_id.is_none() && cw.output_name == current_output_name)
             .map(|cw| cw.id)
             .collect();
 
@@ -768,6 +834,7 @@ impl AeroWM {
 
         let mut alloc_x = -total_w / 2.0;
         let mut positions: Vec<(u32, f64, f64)> = Vec::new();
+        let mut positioned_ids: HashSet<u32> = HashSet::new();
 
         for &root in &roots {
             self.collect_positions(root, alloc_x, 0.0, LEVEL_H, self.gap, WIN_W, &widths, &mut positions);
@@ -776,6 +843,7 @@ impl AeroWM {
 
         // Set animation targets.
         for (id, cx, cy) in positions {
+            positioned_ids.insert(id);
             if let Some(cw) = self.windows.iter_mut().find(|cw| cw.id == id) {
                 cw.target_x = cw.tree_x.unwrap_or(cx);
                 cw.target_y = cw.tree_y.unwrap_or(cy);
@@ -783,7 +851,11 @@ impl AeroWM {
         }
 
         // Resize every window to its base size.
-        let toplevel_ops: Vec<(u32, i32, i32)> = self.windows.iter().map(|cw| (cw.id, cw.tree_width, cw.tree_height)).collect();
+        let toplevel_ops: Vec<(u32, i32, i32)> = self.windows.iter()
+            .filter(|cw| positioned_ids.contains(&cw.id))
+            .map(|cw| (cw.id, cw.tree_width, cw.tree_height))
+            .collect();
+
         for (id, tw, th) in toplevel_ops {
             if let Some(cw) = self.windows.iter_mut().find(|cw| cw.id == id) {
                 cw.base_width = tw;
@@ -884,6 +956,10 @@ impl AeroWM {
                 let color = self.config.background_color;
                 let clear_color = color.map(|x| x as f32 / 255.0);
 
+                let output_name = self.gpu.get(&device_id)
+                    .and_then(|gpu| gpu.crtc_to_output.get(&handle))
+                    .map(|o| o.name());
+
                 let gpu_data = self.gpu.get_mut(&device_id).unwrap();
                 let output = gpu_data.crtc_to_output.get(&handle);
                 let Some(compositor) = gpu_data.compositors.get_mut(&handle) else { return; };
@@ -967,14 +1043,15 @@ impl AeroWM {
                 let vs = self.per_output_state.get(output.unwrap()).unwrap();
 
                 let elements = build_render_elements(
+                    &output_name,
                     &self.windows,
                     &self.x11_override_redirect,
                     &self.space,
                     vs.view_mode,
-                    &self.tiling_visible_ids,
+                    &vs.tiling_visible_ids,
                     self.scale,
                     vs.zoom,
-                    vs.viewport_x + output_position.x as f64 / vs.zoom,
+                    vs.viewport_x,
                     vs.viewport_y,
                     &self.config,
                     &self.show_areas,
@@ -1493,6 +1570,7 @@ impl AeroWM {
                 let resp = MonitorsResponse { monitors };
                 let _ = reply_to.send(serde_json::to_string(&resp).unwrap());
             }
+            InternalCommand::MoveToNextOutput => self.move_to_next_output()
         }
     }
 

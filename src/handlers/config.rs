@@ -197,7 +197,7 @@ pub fn create_config() -> anyhow::Result<()>  {
         .join("aerowm.lua");
     eprintln!("config path: {:?}", result_path);
     let default_config = r#"config = {
-    main_modifier = "Ctrl",
+    main_modifier = "Super",
     gap = 80.0,
     focused_border_color = '#4090c2',
     unfocused_border_color = '#000000',
@@ -243,48 +243,51 @@ pub fn create_config() -> anyhow::Result<()>  {
     always_show_areas = true,
 }
 
+local mainMod = "Super"
+
 -- Window management
-bind("Ctrl+Q",           "close")
-bind("Ctrl+F",           "fullscreen")
-bind("Ctrl+Space",       "switch_view")
+bind(mainMod .. "+Q",           "close")
+bind(mainMod .. "+F",           "fullscreen")
+bind(mainMod .. "+Space",       "switch_view")
+bind(mainMod .. "+G",           "move_to_next_output")
 
 -- Areas
-bind("Ctrl+M", "mark_area")
-bind("Ctrl+A", "show_areas")
-bind("Ctrl+R", "remove_area")
-bind("Ctrl+1", "goto_area", "1")
-bind("Ctrl+2", "goto_area", "2")
-bind("Ctrl+3", "goto_area", "3")
-bind("Ctrl+4", "goto_area", "4")
-bind("Ctrl+5", "goto_area", "5")
-bind("Ctrl+6", "goto_area", "6")
-bind("Ctrl+7", "goto_area", "7")
-bind("Ctrl+8", "goto_area", "8")
-bind("Ctrl+9", "goto_area", "9")
+bind(mainMod .. "+M", "mark_area")
+bind(mainMod .. "+A", "show_areas")
+bind(mainMod .. "+R", "remove_area")
+bind(mainMod .. "+1", "goto_area", "1")
+bind(mainMod .. "+2", "goto_area", "2")
+bind(mainMod .. "+3", "goto_area", "3")
+bind(mainMod .. "+4", "goto_area", "4")
+bind(mainMod .. "+5", "goto_area", "5")
+bind(mainMod .. "+6", "goto_area", "6")
+bind(mainMod .. "+7", "goto_area", "7")
+bind(mainMod .. "+8", "goto_area", "8")
+bind(mainMod .. "+9", "goto_area", "9")
 
 -- Apps
-bind("Ctrl+Return",      "exec", "kitty")
-bind("Ctrl+W",           "exec", "zen-browser")
-bind("Ctrl+E",           "exec", "nautilus")
-bind("Ctrl+Tab", "exec", "launcher")
+bind(mainMod .. "+Return",      "exec", "kitty")
+bind(mainMod .. "+W",           "exec", "zen-browser")
+bind(mainMod .. "+E",           "exec", "nautilus")
+bind(mainMod .. "+Tab", "exec", "launcher")
 
 -- Tree navigation
-bind("Ctrl+P",           "parent")
-bind("Ctrl+N",           "sibling")
-bind("Ctrl+C",           "child")
+bind(mainMod .. "+P",           "parent")
+bind(mainMod .. "+N",           "sibling")
+bind(mainMod .. "+C",           "child")
 
 -- Tree view
-bind("Ctrl+Z",           "focus_zoom")
-bind("Ctrl+Home",        "reset_view")
+bind(mainMod .. "+Z",           "focus_zoom")
+bind(mainMod .. "+Home",        "reset_view")
 
 -- Viewport panning
-bind("Ctrl+Left",        "pan", "-100 0")
-bind("Ctrl+Right",       "pan", "100 0")
-bind("Ctrl+Up",          "pan", "0 -100")
-bind("Ctrl+Down",        "pan", "0 100")
+bind(mainMod .. "+Left",        "pan", "-100 0")
+bind(mainMod .. "+Right",       "pan", "100 0")
+bind(mainMod .. "+Up",          "pan", "0 -100")
+bind(mainMod .. "+Down",        "pan", "0 100")
 
 -- Quit
-bind("Ctrl+Alt+BackSpace", "quit")
+bind(mainMod .. "+Alt+BackSpace", "quit")
 
 -- Monitors
 monitor("HDMI-A-1", "2560x0", 74.78, 1.0)

@@ -43,6 +43,7 @@ pub enum Action {
     GoToArea(u32),
     RemoveArea,
     ShowAreas,
+    MoveToNextOutput,
 }
 
 pub fn parse_keybind(s: &str) -> Result<ParsedKeybind, Error> {
@@ -118,6 +119,7 @@ pub fn parse_action(action: &str, args: Option<String>) -> Result<Action, Error>
         },
         "remove_area" => Ok(Action::RemoveArea),
         "show_areas" => Ok(Action::ShowAreas),
+        "move_to_next_output" => Ok(Action::MoveToNextOutput),
         _ => Err(anyhow!("action type not supported"))
     }
 }
@@ -153,6 +155,7 @@ impl AeroWM {
             Action::RemoveArea => self.remove_current_area(),
             Action::ShowAreas => {},
             Action::GoToArea(n) => self.goto_area(*n),
+            Action::MoveToNextOutput => self.move_to_next_output(),
         }
     }
 
@@ -254,7 +257,7 @@ impl AeroWM {
                         self.zoom_anim_start = 1.0;
                         ViewMode::Tiling
                     },
-                    ViewMode::Fullscreen => { return; },
+                    ViewMode::Fullscreen => { self.pre_fullscreen_viewport.as_ref().unwrap().view_mode },
                 }
             }
         }

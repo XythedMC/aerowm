@@ -472,16 +472,18 @@ impl AeroWM {
                 if ButtonState::Pressed == button_state && !pointer.is_grabbed()
                     && button == BTN_MIDDLE
                 {
-                    let grab = PanCanvasGrab {
-                        start_data: PointerGrabStartData {
-                            focus: None,
-                            button: BTN_MIDDLE,
-                            location: pointer.current_location(),
-                        },
-                        initial_viewport_x: viewport_x,
-                        initial_viewport_y: viewport_y,
-                    };
-                    pointer.set_grab(self, grab, serial, Focus::Clear);
+                    if self.current_view_mode() == ViewMode::TreeView {
+                        let grab = PanCanvasGrab {
+                            start_data: PointerGrabStartData {
+                                focus: None,
+                                button: BTN_MIDDLE,
+                                location: pointer.current_location(),
+                            },
+                            initial_viewport_x: viewport_x,
+                            initial_viewport_y: viewport_y,
+                        };
+                        pointer.set_grab(self, grab, serial, Focus::Clear);
+                    }
                 } else if ButtonState::Pressed == button_state && !pointer.is_grabbed()
                     && button == BTN_LEFT && !main_mod
                 {
@@ -671,8 +673,10 @@ impl AeroWM {
                             self.zoom = vs.zoom;
                             self.zoom_target = vs.zoom;
 
-                            vs.viewport_x += self.cursor_position.x * (1.0 / old_zoom - 1.0 / vs.zoom);
-                            vs.viewport_y += self.cursor_position.y * (1.0 / old_zoom - 1.0 / vs.zoom);
+                            let output_x = self.space.output_geometry(&output).map(|g| g.loc.x as f64).unwrap_or(0.0);
+                            let output_y = self.space.output_geometry(&output).map(|g| g.loc.y as f64).unwrap_or(0.0);
+                            vs.viewport_x += (self.cursor_position.x - output_x) * (1.0 / old_zoom - 1.0 / vs.zoom);
+                            vs.viewport_y += (self.cursor_position.y - output_y) * (1.0 / old_zoom - 1.0 / vs.zoom);
 
                             self.viewport_target_x = vs.viewport_x;
                             self.viewport_target_y = vs.viewport_y;
@@ -724,8 +728,10 @@ impl AeroWM {
                         self.zoom = vs.zoom;
                         self.zoom_target = vs.zoom;
 
-                        vs.viewport_x += self.cursor_position.x * (1.0 / old_zoom - 1.0 / vs.zoom);
-                        vs.viewport_y += self.cursor_position.y * (1.0 / old_zoom - 1.0 / vs.zoom);
+                        let output_x = self.space.output_geometry(&output).map(|g| g.loc.x as f64).unwrap_or(0.0);
+                        let output_y = self.space.output_geometry(&output).map(|g| g.loc.y as f64).unwrap_or(0.0);
+                        vs.viewport_x += (self.cursor_position.x - output_x) * (1.0 / old_zoom - 1.0 / vs.zoom);
+                        vs.viewport_y += (self.cursor_position.y - output_y) * (1.0 / old_zoom - 1.0 / vs.zoom);
 
                         self.viewport_target_x = vs.viewport_x;
                         self.viewport_target_y = vs.viewport_y;

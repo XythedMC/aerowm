@@ -28,8 +28,15 @@ impl XwmHandler for AeroWM {
         let id = self.alloc_id();
         tracing::info!("new_toplevel: id={id}");
 
+        let output_name = self.output_under_cursor().map(|o| o.name());
         // Parent = currently focused window; None means new tree root.
-        let parent_id = self.focused_window_id;
+        let mut parent_id = None;
+        if let Some(focused_window_id) = self.focused_window_id {
+            let focused_window = self.windows.iter().find(|cw| cw.id == focused_window_id).unwrap();
+            if focused_window.output_name == output_name { 
+                parent_id = Some(focused_window_id);
+            }
+        };
 
         let (initial_w, initial_h) = {
             let size = window.geometry().size;
@@ -93,6 +100,7 @@ impl XwmHandler for AeroWM {
             pre_fullscreen_height: 0,
             z_index,
             needs_center: self.config.center_on_launch,
+            output_name: self.output_under_cursor().map(|o| o.name())
         });
 
         self.emit_event(crate::ipc::IpcEvent::WindowOpened {

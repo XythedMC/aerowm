@@ -71,6 +71,11 @@ void main() {
     gl_FragColor = vec4(u_color.rgb * u_color.a, u_color.a);
 }   
 "#;
+
+pub fn convert_color(color: [u8; 4]) -> [f32; 4] {
+    let [r, g, b, a] = color;
+    [r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0, a as f32 / 255.0]
+}
 // ── Shader compilation ─────────────────────────────────────────────────────────
 
 pub fn compile_line(r: &mut GlesRenderer) -> Option<GlesPixelProgram> {
@@ -185,15 +190,10 @@ pub fn focus_border_elements(
     let sy = geo.loc.y - bw;
     let ww = (geo.size.w as f64 * zoom) as i32 + bw * 2;
     let wh = (geo.size.h as f64 * zoom) as i32 + bw * 2;
-    let mut color = [0.0, 0.0, 0.0, 1.0];
+    let color = if Some(cw.id) == fid { 
+        convert_color(config.focused_border_color) 
+    } else { convert_color(config.unfocused_border_color) };
 
-    if Some(cw.id) == fid {
-        let [r, g, b, a] = config.focused_border_color;
-        color = [r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0, a as f32 / 255.0];
-    } else {
-        let [r, g, b, a] = config.unfocused_border_color;
-        color = [r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0, a as f32 / 255.0];
-    }
 
     let area = Rectangle { loc: (sx, sy).into(), size: (ww, wh).into() };
 
@@ -257,6 +257,7 @@ pub fn draw_cursor(
 }
 
 pub fn build_render_elements(
+    output_name: &Option<String>,
     windows: &[CanvasWindow],
     or_windows: &[Window],
     space: &Space<Window>,
@@ -308,6 +309,7 @@ pub fn build_render_elements(
     sorted_windows.sort_by_key(|cw| std::cmp::Reverse(cw.z_index));
 
     for window in sorted_windows {
+        if &window.output_name != output_name { continue; }
         if view_mode == ViewMode::Tiling && !tiling_visible_ids.contains(&window.id) {continue;}
         if view_mode == ViewMode::Fullscreen && !window.is_fullscreen { continue; }
         

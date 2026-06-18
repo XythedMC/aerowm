@@ -26,6 +26,8 @@ pub enum IpcCommand {
     GetAreas,
     #[serde(rename = "get_monitors")]
     GetMonitors,
+    #[serde(rename = "move_to_next_output")]
+    MoveToNextOutput
 }
 
 pub enum InternalCommand {
@@ -37,6 +39,7 @@ pub enum InternalCommand {
     Close { id: String },
     GetAreas { reply_to: oneshot::Sender<String> },
     GetMonitors { reply_to: oneshot::Sender<String> },
+    MoveToNextOutput,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -179,6 +182,7 @@ pub async fn run_ipc_server(
                                             line.clear();
                                             continue;                                            
                                         }
+                                        IpcCommand::MoveToNextOutput => InternalCommand::MoveToNextOutput
                                     };
                                     let _ = cmd_tx.send(internal_cmd);
                                 }

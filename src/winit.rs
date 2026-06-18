@@ -114,12 +114,15 @@ pub fn init_winit(
                         let background_color = state.config.background_color;
                         let color = background_color.map(|x| x as f32 / 255.0);
                         let Some(vs) = state.per_output_state.get(&output) else { return; };
+                        let output_name = state.output_under_cursor().map(|o| o.name());
+
                         let overlays = rendering::build_render_elements(
+                            &output_name,
                             &state.windows,
                             &state.x11_override_redirect,
                             &state.space,
                             vs.view_mode,
-                            &state.tiling_visible_ids,
+                            &vs.tiling_visible_ids,
                             state.scale,
                             state.zoom,
                             state.viewport_x,

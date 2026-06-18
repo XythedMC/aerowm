@@ -89,9 +89,20 @@ impl PointerGrab<AeroWM> for MoveSurfaceGrab {
     ) {
         handle.button(data, event);
 
+        let output = data.output_under_cursor().cloned();
         const BTN_LEFT: u32 = 0x110;
+        
         if !handle.current_pressed().contains(&BTN_LEFT) {
             handle.unset_grab(self, data, event.serial, event.time, true);
+            for cw in data.windows.iter_mut() {
+                if cw.window
+                    .toplevel()
+                    .map_or(false, |t| t.wl_surface() == &self.window_surface)
+                {
+                    cw.output_name = output.map(|o| o.name());
+                    break;
+                }
+            }
         }
     }
 
