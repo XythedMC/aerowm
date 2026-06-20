@@ -286,6 +286,10 @@ bind(mainMod .. "+Right",       "pan", "100 0")
 bind(mainMod .. "+Up",          "pan", "0 -100")
 bind(mainMod .. "+Down",        "pan", "0 100")
 
+-- Scratchpad
+bind(mainMod .. "+S",             "send_to_scratchpad")
+bind(mainMod .. "+Shift+S",       "toggle_scratchpad")
+
 -- Quit
 bind(mainMod .. "+Alt+BackSpace", "quit")
 

@@ -1,9 +1,9 @@
 use std::fs::{remove_file};
 
 use anyhow::{Error, anyhow};
-use smithay::{backend::session::Session, input::keyboard::{Keysym, ModifiersState, xkb::{KEYSYM_CASE_INSENSITIVE, keysym_from_name}}};
+use smithay::{backend::session::Session, input::keyboard::{Keysym, ModifiersState, xkb::{KEYSYM_CASE_INSENSITIVE, keysym_from_name}}, utils::Point};
 
-use crate::{AeroWM, state::{ModifierKey, ViewMode}};
+use crate::{AeroWM, state::{CanvasWindow, ModifierKey, ViewMode}};
 
 #[derive(Debug, Clone)]
 pub struct ParsedKeybind {
@@ -44,6 +44,8 @@ pub enum Action {
     RemoveArea,
     ShowAreas,
     MoveToNextOutput,
+    SendToScratchpad,
+    ToggleScratchpad,
 }
 
 pub fn parse_keybind(s: &str) -> Result<ParsedKeybind, Error> {
@@ -73,7 +75,22 @@ pub fn parse_keybind(s: &str) -> Result<ParsedKeybind, Error> {
             }
         }
     }
+    let has_shift = mods.contains(&ModifierKey::Shift);
     let trigger = trigger.ok_or_else(|| anyhow!("no key or button in keybind"))?;
+    let trigger = if has_shift {
+        if let Trigger::Key(sym) = trigger {
+            let raw = sym.raw();
+            if raw >= 0x61 && raw <= 0x7a {
+                Trigger::Key(smithay::input::keyboard::xkb::Keysym::new(raw - 0x20))
+            } else {
+                Trigger::Key(sym)
+            }
+        } else {
+            trigger
+        }
+    } else {
+        trigger
+    };
     Ok(ParsedKeybind { mods, trigger })
 }
 
@@ -120,6 +137,8 @@ pub fn parse_action(action: &str, args: Option<String>) -> Result<Action, Error>
         "remove_area" => Ok(Action::RemoveArea),
         "show_areas" => Ok(Action::ShowAreas),
         "move_to_next_output" => Ok(Action::MoveToNextOutput),
+        "send_to_scratchpad" => Ok(Action::SendToScratchpad),
+        "toggle_scratchpad" => Ok(Action::ToggleScratchpad),
         _ => Err(anyhow!("action type not supported"))
     }
 }
@@ -156,6 +175,8 @@ impl AeroWM {
             Action::ShowAreas => {},
             Action::GoToArea(n) => self.goto_area(*n),
             Action::MoveToNextOutput => self.move_to_next_output(),
+            Action::SendToScratchpad => self.send_to_scratchpad(),
+            Action::ToggleScratchpad => self.toggle_scratchpad(),
         }
     }
 
@@ -224,6 +245,102 @@ impl AeroWM {
         self.viewport_target_y = cy - (sh / 2) as f64 / zoom_target;
         self.begin_animation();
         self.current_area = Some(n);
+    }
+
+    fn send_to_scratchpad(&mut self) {
+            let Some(focused_window_id) = self.focused_window_id else { return; };
+        let parent_id;
+        let children;
+        {
+            let window = self.windows.iter().find(|cw| cw.id == focused_window_id).unwrap();
+            
+            if window.is_scratchpad { return; }
+            parent_id = window.parent_id.clone();
+            children = window.children.clone();
+        }
+
+        // detach children from focused window and attach to their grandparents
+        let children_windows: Vec<&mut CanvasWindow> = self.windows.iter_mut().filter(|cw| children.contains(&cw.id)).collect();
+        for window in children_windows {
+            window.parent_id = parent_id;
+        }
+        {
+            if let Some(parent_id) = parent_id {
+                if let Some(parent) = self.windows.iter_mut().find(|cw| cw.id == parent_id) {
+                    let insert_pos = parent.children.iter().position(|&id| id == focused_window_id);
+                    parent.children.retain(|w| w != &focused_window_id);
+                    if let Some(pos) = insert_pos {
+                        for (i, &child_id) in children.iter().enumerate() {
+                            parent.children.insert(pos + i, child_id);
+                        }
+                    } else {
+                        parent.children.extend_from_slice(&children);
+                    }
+                }
+            }
+        }
+        let window = self.windows.iter_mut().find(|cw| cw.id == focused_window_id).unwrap();
+
+        window.is_scratchpad = true;
+        window.scratchpad_visible = false;
+        window.children = Vec::new();
+        window.parent_id = None;
+
+        let local = window.window.clone();
+        self.space.unmap_elem(&local);
+
+        if let Some(parent_id) = parent_id { 
+            self.focus_by_id(parent_id);
+        } else { 
+            let non_scratchpad = self.windows.iter().find(|cw| !cw.is_scratchpad);
+            if let Some(window) = non_scratchpad { 
+                self.focus_by_id(window.id);
+            } else {
+                self.focus_clear();
+            }
+        }; 
+
+        self.apply_layout();
+    }
+
+    fn toggle_scratchpad(&mut self) {
+        if let Some(focused_window_id) = self.focused_window_id {
+            let is_visible_scratchpad;
+            let win_clone;
+            {
+                let window = self.windows.iter_mut().find(|cw| cw.id == focused_window_id).unwrap();
+                is_visible_scratchpad = window.is_scratchpad && window.scratchpad_visible;
+                win_clone = window.window.clone();
+                if is_visible_scratchpad { window.scratchpad_visible = false; }
+            }
+            if is_visible_scratchpad {
+                self.space.unmap_elem(&win_clone);
+                let non_scratchpad = self.windows.iter().find(|cw| !cw.is_scratchpad).map(|cw| cw.id);
+                match non_scratchpad {
+                    Some(id) => self.focus_by_id(id),
+                    None => self.focus_clear(),
+                }
+                return;
+            }
+        }
+
+        let (screen_width, screen_height) = self.output_size();
+        let (viewport_x, viewport_y, zoom) = self.current_viewport();
+        let Some(window) = self.windows.iter_mut().find(|cw| cw.is_scratchpad && !cw.scratchpad_visible) else { return; };
+        let id = window.id;
+
+        let cx = viewport_x + screen_width / (2.0 * zoom) - window.base_width as f64 / 2.0;
+        let cy = viewport_y + screen_height / (2.0 * zoom) - window.base_height as f64 / 2.0;
+        window.scratchpad_visible = true;
+        window.canvas_x = cx;
+        window.canvas_y = cy;
+        window.target_x = cx;
+        window.target_y = cy;
+        window.anim_start_x = cx;
+        window.anim_start_y = cy;
+        let win = window.window.clone();
+        self.space.map_element(win, Point::new(cx as i32, cy as i32), true);
+        self.focus_by_id(id);
     }
 
     fn fullscreen(&mut self) {

@@ -91,7 +91,7 @@ impl AeroWM {
                     time,
                     |data, modifiers, handle| {
                         let sym = handle.modified_sym();
-                        
+
                         if key_state == KeyState::Pressed {
                             for (keybind, action) in &data.config.keybinds {
                                 if let Trigger::Key(keysym) = keybind.trigger {
@@ -179,6 +179,7 @@ impl AeroWM {
                 let (canvas_cx, canvas_cy) = self.cursor_to_canvas();
 
                 let Some(window) = self.windows.iter().find(|cw| {
+                    (!cw.is_scratchpad || cw.scratchpad_visible) &&
                     (cw.canvas_x..(cw.canvas_x + cw.base_width as f64)).contains(&canvas_cx) &&
                     (cw.canvas_y..(cw.canvas_y + cw.base_height as f64)).contains(&canvas_cy)
                 }) else {
@@ -489,7 +490,7 @@ impl AeroWM {
                 {
                     let px = pointer.current_location().x as i32;
                     let py = pointer.current_location().y as i32;
-                    let found = self.windows.iter().rev().find_map(|cw| {
+                    let found = self.windows.iter().rev().filter(|cw| !cw.is_scratchpad || cw.scratchpad_visible).find_map(|cw| {
                         match self.window_edge_at(cw, px, py) {
                             ResizeEdge::None => {
                                 let wx = ((cw.canvas_x - viewport_x) * zoom) as i32;
@@ -566,6 +567,7 @@ impl AeroWM {
                 } else if ButtonState::Pressed == button_state && !pointer.is_grabbed() && !self.active_drag {
 
                     let hit = self.windows.iter().find(|cw| {
+                        (!cw.is_scratchpad || cw.scratchpad_visible) &&
                         (cw.canvas_x..(cw.canvas_x + cw.base_width as f64)).contains(&cx) &&
                         (cw.canvas_y..(cw.canvas_y + cw.base_height as f64)).contains(&cy)
                     });

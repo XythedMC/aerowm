@@ -72,6 +72,7 @@ pub enum ViewMode {
     Fullscreen,
 }
 #[derive(Clone, Copy, Debug)]
+#[derive(PartialEq)]
 pub enum ModifierKey {
     Ctrl,
     Alt,
@@ -162,6 +163,9 @@ pub struct CanvasWindow {
     pub needs_center: bool,
 
     pub output_name: Option<String>,
+
+    pub is_scratchpad: bool,
+    pub scratchpad_visible: bool,
 }
 
 pub struct AeroWM {
@@ -566,7 +570,7 @@ impl AeroWM {
         self.emit_event(IpcEvent::LayoutChanged);
     }
 
-    fn output_size(&self) -> (f64, f64) {
+    pub fn output_size(&self) -> (f64, f64) {
         self.output_under_cursor()
             .and_then(|o| self.space.output_geometry(o))
             .map(|g| (g.size.w as f64, g.size.h as f64))
@@ -726,12 +730,12 @@ impl AeroWM {
             .filter(|&id| {
                 self.windows.iter()
                     .find(|w| w.id == id)
-                    .map(|w| w.output_name == current_output_name)
+                    .map(|w| w.output_name == current_output_name && !w.is_scratchpad)
                     .unwrap_or(false)
             })
             .or_else(|| {
                 self.windows.iter()
-                    .find(|w| w.parent_id.is_none() && w.output_name == current_output_name)
+                    .find(|w| w.parent_id.is_none() && w.output_name == current_output_name && !w.is_scratchpad)
                     .map(|w| w.id)
             }) else { return; };
         
@@ -768,7 +772,7 @@ impl AeroWM {
             if let Some(&(tx, ty, _, _)) = slots.get(&cw.id) {
                 cw.target_x = tx + self.config.tile_distance as f64;
                 cw.target_y = ty + self.config.tile_distance as f64;
-            } else if cw.output_name == current_output_name {
+            } else if cw.output_name == current_output_name && !cw.is_scratchpad {
                 self.space.unmap_elem(&cw.window);
             }
         }
@@ -821,7 +825,7 @@ impl AeroWM {
         let roots: Vec<u32> = self
             .windows
             .iter()
-            .filter(|cw| cw.parent_id.is_none() && cw.output_name == current_output_name)
+            .filter(|cw| cw.parent_id.is_none() && cw.output_name == current_output_name && !cw.is_scratchpad)
             .map(|cw| cw.id)
             .collect();
 
@@ -886,7 +890,7 @@ impl AeroWM {
         const GAP: f64 = 80.0;
 
         let mut widths: HashMap<u32, f64> = HashMap::new();
-        let mut remaining: Vec<u32> = self.windows.iter().map(|cw| cw.id).collect();
+        let mut remaining: Vec<u32> = self.windows.iter().filter(|cw| !cw.is_scratchpad).map(|cw| cw.id).collect();
 
         loop {
             let before = remaining.len();
@@ -1266,6 +1270,7 @@ impl AeroWM {
         let updates: Vec<(Window, i32, i32)> = self
             .windows
             .iter()
+            .filter(|cw| !cw.is_scratchpad || cw.scratchpad_visible)
             .map(|cw| {
                 let sx = ((cw.canvas_x - vx) * zoom) as i32;
                 let sy = ((cw.canvas_y - vy) * zoom) as i32;

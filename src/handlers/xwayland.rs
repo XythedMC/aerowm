@@ -100,7 +100,9 @@ impl XwmHandler for AeroWM {
             pre_fullscreen_height: 0,
             z_index,
             needs_center: self.config.center_on_launch,
-            output_name: self.output_under_cursor().map(|o| o.name())
+            output_name: self.output_under_cursor().map(|o| o.name()),
+            is_scratchpad: false,
+            scratchpad_visible: false,
         });
 
         self.emit_event(crate::ipc::IpcEvent::WindowOpened {

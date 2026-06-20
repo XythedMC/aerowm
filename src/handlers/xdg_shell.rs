@@ -38,7 +38,7 @@ impl XdgShellHandler for AeroWM {
         let mut parent_id = None;
         if let Some(focused_window_id) = self.focused_window_id {
             let focused_window = self.windows.iter().find(|cw| cw.id == focused_window_id).unwrap();
-            if focused_window.output_name == output_name { 
+            if focused_window.output_name == output_name && !focused_window.is_scratchpad { 
                 parent_id = Some(focused_window_id);
             }
         };
@@ -96,6 +96,8 @@ impl XdgShellHandler for AeroWM {
             z_index,
             needs_center: self.config.center_on_launch,
             output_name,
+            is_scratchpad: false,
+            scratchpad_visible: false,
         });
 
         self.emit_event(crate::ipc::IpcEvent::WindowOpened {

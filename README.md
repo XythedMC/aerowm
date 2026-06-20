@@ -16,6 +16,7 @@ AeroWM organises windows in a tree structure. You can work in a focused **tiling
 - **Lua config** - all settings and keybinds are defined in a single Lua file
 - **Borders with corner rounding** - customisable focused/unfocused border colours and rounded corners
 - **Hover to focus** - optional focus-follows-mouse
+- **Scratchpad** - floating windows that live outside the tree, toggled in and out of view
 - **Background** - solid colour, image, or custom GLSL shader
 - **XWayland support** - run X11 applications alongside native Wayland clients
 - **Areas** - define named rectangular regions on the canvas and jump to them instantly
@@ -147,7 +148,7 @@ Modifiers: `Ctrl`, `Alt`, `Shift`, `Super`. Mouse buttons: `left`, `right`, `mid
 - ~~**Background images and shaders** - image backgrounds and custom GLSL shaders~~
 - ~~**Trackpad support** - gestures for panning, zooming, and switching views~~
 - **Animations** - window open/close transitions
-- **Scratchpad** - floating windows outside the tree
+- ~~**Scratchpad** - floating windows outside the tree~~
 - **Window rules** - auto-assign apps to positions or parents on launch
 - ~~**IPC** - full external control protocol over the Unix socket~~
 - **Screenshot/screencopy** - wlr-screencopy protocol support

@@ -157,9 +157,12 @@ pub fn connector_elements(windows: &[CanvasWindow], zoom: f64, viewport_x: f64, 
         .iter()
         .filter_map(|cw| {
             if cw.is_fullscreen { return None; }
+            if cw.is_scratchpad { return None; }
             let pid    = cw.parent_id?;
             let parent = windows.iter().find(|p| p.id == pid)?;
-
+            
+            if parent.is_scratchpad { return None; }
+            
             let z   = zoom as f32;
             let px = ((parent.canvas_x - viewport_x) * zoom) as f32;
             let py = ((parent.canvas_y - viewport_y) * zoom) as f32;
@@ -310,8 +313,9 @@ pub fn build_render_elements(
 
     for window in sorted_windows {
         if &window.output_name != output_name { continue; }
-        if view_mode == ViewMode::Tiling && !tiling_visible_ids.contains(&window.id) {continue;}
+        if view_mode == ViewMode::Tiling && !tiling_visible_ids.contains(&window.id) && !(window.is_scratchpad && window.scratchpad_visible) {continue;}
         if view_mode == ViewMode::Fullscreen && !window.is_fullscreen { continue; }
+        if window.is_scratchpad && !window.scratchpad_visible { continue; };
         
         let sx = ((window.canvas_x - viewport_x) * zoom) as i32;
         let sy = ((window.canvas_y - viewport_y) * zoom) as i32;
@@ -356,7 +360,8 @@ pub fn build_render_elements(
     }
 
     let mut push_strip = |loc: Point<f64, Logical>, size: Size<i32, Logical>, color: [u8; 4]| {
-        let buf = SolidColorBuffer::new(size, Color32F::new(color[0] as f32 / 255.0, color[1] as f32 / 255.0, color[2] as f32 / 255.0, color[3] as f32 / 255.0));
+        let color = convert_color(color);
+        let buf = SolidColorBuffer::new(size, Color32F::new(color[0], color[1], color[2], color[3]));
         let elem = SolidColorRenderElement::from_buffer(
             &buf, 
             loc.to_physical_precise_round(scale), 
