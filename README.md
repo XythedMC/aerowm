@@ -21,6 +21,8 @@ AeroWM organises windows in a tree structure. You can work in a focused **tiling
 - **Screencopy** - ext-image-copy-capture protocol support for screenshot and screen recording tools
 - **Clipboard manager** - wlr-data-control protocol support
 - **IME support** - zwp-text-input-v3 and zwp-input-method-v2 protocol support
+- **XKB layout switching** - cycle between keyboard layouts with a keybind
+- **Pointer acceleration** - flat speed multiplier or custom Lua acceleration function
 - **Background** - solid colour, image, or custom GLSL shader
 - **XWayland support** - run X11 applications alongside native Wayland clients
 - **Areas** - define named rectangular regions on the canvas and jump to them instantly

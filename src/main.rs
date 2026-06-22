@@ -9,6 +9,7 @@ mod rendering;
 mod keybind;
 
 use dirs::config_dir;
+use mlua::Error;
 use notify::{RecursiveMode, Watcher};
 pub use state::AeroWM;
 
@@ -41,18 +42,18 @@ fn main() -> anyhow::Result<()>{
         }
     };
 
-    let config = match read_config(){
-        Ok(aerowm_config) => aerowm_config,
+    let (config, lua) = match read_config(){
+        Ok(result) => result,
         Err(_) => {
             create_config()?;
-            read_config().expect("Failed to read config after initial creation for some weird reason")
+            read_config().expect("Failed to read config after creation")
         }
     };
 
     let mut event_loop: EventLoop<'static, AeroWM> = EventLoop::try_new().expect("Failed to create event loop");
     let display: Display<AeroWM> = Display::new().unwrap();
 
-    let mut state = AeroWM::new(&mut event_loop, display, config);
+    let mut state = AeroWM::new(&mut event_loop, display, config, lua);
 
     let (cmd_tx, cmd_rx) = channel::<ipc::InternalCommand>();
     let (config_tx, config_rx) = channel::<()>();

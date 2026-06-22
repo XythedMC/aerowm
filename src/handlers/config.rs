@@ -1,6 +1,6 @@
 
 use mlua::{
-    Error, Lua, Table
+    Error, Function, Lua, Table
 };
 use anyhow::anyhow;
 use std::{cell::RefCell, collections::HashMap, fs::{create_dir_all, read_to_string, write}, rc::Rc};
@@ -42,7 +42,9 @@ pub struct AeroWMConfig {
     pub area_colors: Vec<[u8; 4]>,
     pub always_show_areas: bool,
 
-    pub monitors: Vec<MonitorConfig>
+    pub monitors: Vec<MonitorConfig>,
+
+    pub input_config: InputConfig,
 }
 
 #[derive(Debug, Clone)]
@@ -60,12 +62,21 @@ pub struct MonitorConfig {
     pub scale: f64,
 }
 
+#[derive(Debug, Clone)]
+pub struct InputConfig {
+    pub layouts: Vec<String>,
+    pub repeat_rate: i32,
+    pub repeat_delay: i32,
+    pub pointer_speed: f64, 
+    pub pointer_acceleration: Option<Function>,
+}
+
 pub fn get_colors_rgba(key: &str) -> [u8; 4] {
     let color = HexColor::parse(key).expect(format!("Failed to convert color {} to rgba", key).as_str());
     [color.r, color.g, color.b, color.a]
 }
 
-pub fn read_config() -> Result<AeroWMConfig, Error> {
+pub fn read_config() -> Result<(AeroWMConfig, Lua), Error> {
     let config_path = config_dir()
         .ok_or_else(|| Error::runtime("Config directory ($HOME/.config) doesn't exist"))?
         .join("aerowm")
@@ -163,7 +174,17 @@ pub fn read_config() -> Result<AeroWMConfig, Error> {
     let area_border_thickness = table.get::<i32>("area_border_thickness").map_err(|e| Error::runtime(e.to_string()))?;
     let always_show_areas = table.get::<bool>("always_show_areas").map_err(|e| Error::runtime(e.to_string()))?;
 
-    Ok(AeroWMConfig {
+    let input_table = lua.globals().get::<Table>("input").map_err(|e| Error::runtime(e.to_string()))?;
+
+    let input_config = InputConfig {
+        layouts: input_table.get::<Vec<String>>("layouts").map_err(|e| Error::runtime(e.to_string()))?,
+        repeat_rate: input_table.get::<i32>("repeat_rate").map_err(|e| Error::runtime(e.to_string()))?,
+        repeat_delay: input_table.get::<i32>("repeat_delay").map_err(|e| Error::runtime(e.to_string()))?,
+        pointer_speed: input_table.get::<f64>("pointer_speed").map_err(|e| Error::runtime(e.to_string()))?,
+        pointer_acceleration: input_table.get::<Option<Function>>("pointer_acceleration").map_err(|e| Error::runtime(e.to_string()))?,
+    };
+
+    Ok((AeroWMConfig {
         main_modifier,
         gap,
         focused_border_color,
@@ -187,7 +208,8 @@ pub fn read_config() -> Result<AeroWMConfig, Error> {
         area_border_thickness,
         always_show_areas,
         monitors,
-    })
+        input_config,
+    }, lua))
 }
 
 pub fn create_config() -> anyhow::Result<()>  {
@@ -243,7 +265,19 @@ pub fn create_config() -> anyhow::Result<()>  {
     always_show_areas = true,
 }
 
+input = {
+    layouts = {"us"},
+    repeat_rate = 25,
+    repeat_delay = 600,
+    pointer_speed = 1.0,
+    pointer_acceleration = function(speed)
+        return 1.0 + speed * 0.1
+    end,
+}
+
 local mainMod = "Super"
+
+bind("Alt+Shift",               "switch_layout")
 
 -- Window management
 bind(mainMod .. "+Q",           "close")

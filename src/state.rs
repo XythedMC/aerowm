@@ -8,7 +8,7 @@ use std::{
     time::{Duration, Instant}
 };
 
-use mlua::Error;
+use mlua::{Error, Lua};
 use smithay::{
     backend::{
         allocator::{Fourcc, dmabuf::Dmabuf, gbm::{GbmAllocator, GbmDevice}}, 
@@ -20,7 +20,7 @@ use smithay::{
             gles::{GlesPixelProgram, GlesRenderer, GlesTexture, UniformName, UniformType, element::PixelShaderElement, ffi}
         }, 
         session::libseat::LibSeatSession
-    }, desktop::{LayerSurface, PopupManager, Space, Window, WindowSurfaceType, layer_map_for_output}, input::{Seat, SeatState, pointer::CursorImageStatus}, output::Output, reexports::{
+    }, desktop::{LayerSurface, PopupManager, Space, Window, WindowSurfaceType, layer_map_for_output}, input::{Seat, SeatState, keyboard::XkbConfig, pointer::CursorImageStatus}, output::Output, reexports::{
         calloop::{EventLoop, Interest, LoopSignal, Mode, PostAction, RegistrationToken, generic::Generic}, drm::control::crtc::Handle, wayland_protocols::xdg::shell::server::xdg_toplevel::ResizeEdge, wayland_server::{
             Display, 
             DisplayHandle, 
@@ -204,6 +204,7 @@ pub struct AeroWM {
     pub pre_fullscreen_viewport: Option<ViewportState>,
 
     pub config: AeroWMConfig,
+    pub lua: Lua,
 
     // Areas
     pub areas: HashMap<u32, Rectangle<f64, Logical>>,
@@ -279,7 +280,7 @@ pub struct AeroWM {
 }
 
 impl AeroWM {
-    pub fn new(event_loop: &mut EventLoop<'static, Self>, display: Display<Self>, config: AeroWMConfig) -> Self {
+    pub fn new(event_loop: &mut EventLoop<'static, Self>, display: Display<Self>, config: AeroWMConfig, lua: Lua) -> Self {
         let start_time = std::time::Instant::now();
         let dh = display.handle();
 
@@ -309,7 +310,16 @@ impl AeroWM {
         let pending_screencopy_frames = Vec::new();
         let mut seat_state = SeatState::new();
         let mut seat: Seat<Self> = seat_state.new_wl_seat(&dh, "winit");
-        seat.add_keyboard(Default::default(), 200, 25).expect("Keyboard not found while trying to add it");
+        let layouts = config.input_config.layouts.join(",");
+        let layouts = layouts.as_str();
+        let xkb_config = XkbConfig {
+            rules: "",
+            model: "",
+            layout: layouts,
+            variant: "",
+            options: None,
+        };
+        seat.add_keyboard(xkb_config, config.input_config.repeat_delay, config.input_config.repeat_rate).expect("Keyboard not found while trying to add it");
         seat.add_pointer();
 
         let space = Space::default();
@@ -368,6 +378,7 @@ impl AeroWM {
             zoom: 1.0,
             gap: config.gap,
             config,
+            lua,
             areas: HashMap::new(),
             marking_area: None,
             marking_area_start: None,
@@ -1252,7 +1263,7 @@ impl AeroWM {
 
     // -- Config -----------------------------------
     pub fn reload_config(&mut self) -> Result<(), Error> {
-        let config = match read_config() {
+        let (config, _) = match read_config() {
             Ok(config) => config,
             Err(e) => return Err(e),
         };

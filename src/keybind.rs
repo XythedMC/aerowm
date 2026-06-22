@@ -14,7 +14,8 @@ pub struct ParsedKeybind {
 #[derive(Debug, Clone)]
 pub enum Trigger {
     Key(Keysym),
-    Button(MouseButtons)
+    Button(MouseButtons),
+    Modifiers,
 }
 #[derive(Debug, Clone, Copy)]
 #[repr(u32)]
@@ -46,6 +47,7 @@ pub enum Action {
     MoveToNextOutput,
     SendToScratchpad,
     ToggleScratchpad,
+    SwitchLayout,
 }
 
 pub fn parse_keybind(s: &str) -> Result<ParsedKeybind, Error> {
@@ -76,12 +78,12 @@ pub fn parse_keybind(s: &str) -> Result<ParsedKeybind, Error> {
         }
     }
     let has_shift = mods.contains(&ModifierKey::Shift);
-    let trigger = trigger.ok_or_else(|| anyhow!("no key or button in keybind"))?;
+    let trigger = trigger.unwrap_or(Trigger::Modifiers);
     let trigger = if has_shift {
         if let Trigger::Key(sym) = trigger {
             let raw = sym.raw();
             if raw >= 0x61 && raw <= 0x7a {
-                Trigger::Key(smithay::input::keyboard::xkb::Keysym::new(raw - 0x20))
+                Trigger::Key(Keysym::new(raw - 0x20))
             } else {
                 Trigger::Key(sym)
             }
@@ -139,6 +141,7 @@ pub fn parse_action(action: &str, args: Option<String>) -> Result<Action, Error>
         "move_to_next_output" => Ok(Action::MoveToNextOutput),
         "send_to_scratchpad" => Ok(Action::SendToScratchpad),
         "toggle_scratchpad" => Ok(Action::ToggleScratchpad),
+        "switch_layout" => Ok(Action::SwitchLayout),
         _ => Err(anyhow!("action type not supported"))
     }
 }
@@ -177,6 +180,7 @@ impl AeroWM {
             Action::MoveToNextOutput => self.move_to_next_output(),
             Action::SendToScratchpad => self.send_to_scratchpad(),
             Action::ToggleScratchpad => self.toggle_scratchpad(),
+            Action::SwitchLayout => self.switch_layout(),
         }
     }
 
@@ -217,6 +221,7 @@ impl AeroWM {
             self.areas.remove(&n);
         }
     }
+
     fn resize_focused(&mut self, x: i32, y: i32) {
         if let Some(fid) = self.focused_window_id {
             if let Some(cw) = self.windows.iter_mut().find(|cw| cw.id == fid) {
@@ -245,6 +250,11 @@ impl AeroWM {
         self.viewport_target_y = cy - (sh / 2) as f64 / zoom_target;
         self.begin_animation();
         self.current_area = Some(n);
+    }
+
+    fn switch_layout(&mut self) {
+        let keyboard = self.seat.get_keyboard().expect("Keyboard not found while trying to add it");
+        keyboard.with_xkb_state(self, |mut state| state.cycle_next_layout());
     }
 
     fn send_to_scratchpad(&mut self) {

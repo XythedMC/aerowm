@@ -2,7 +2,7 @@ use smithay::{
     backend::input::{
         AbsolutePositionEvent, Axis, AxisSource, ButtonState, Event, GesturePinchUpdateEvent, GestureSwipeUpdateEvent, InputBackend, InputEvent, KeyState, KeyboardKeyEvent, PointerAxisEvent, PointerButtonEvent, PointerMotionEvent
     }, desktop::{WindowSurfaceType, layer_map_for_output}, input::{
-        keyboard::FilterResult,
+        keyboard::{FilterResult, Keysym},
         pointer::{AxisFrame, ButtonEvent, CursorIcon, CursorImageStatus, Focus, GrabStartData as PointerGrabStartData, MotionEvent},
     }, reexports::{wayland_protocols::xdg::shell::server::xdg_toplevel::ResizeEdge, wayland_server::protocol::wl_surface::WlSurface}, utils::{Logical, Point, Rectangle, SERIAL_COUNTER}, wayland::{input_method::InputMethodSeat, shell::wlr_layer::KeyboardInteractivity},
 };
@@ -73,6 +73,11 @@ impl AeroWM {
         CursorImageStatus::default_named()
     }
 
+    fn is_modifier_keysym(&self, sym: Keysym) -> bool {
+        matches!(sym, Keysym::Shift_L | Keysym::Shift_R | Keysym::Alt_L | Keysym::Alt_R | 
+                Keysym::Control_L | Keysym::Control_R | Keysym::Super_L | Keysym::Super_R)
+    }
+
     pub fn process_input_event<I: InputBackend>(&mut self, event: InputEvent<I>) { 
         self.idle_notifier_state.notify_activity(&self.seat);
         match event {
@@ -104,6 +109,12 @@ impl AeroWM {
                                                 data.show_areas = true;
                                                 return FilterResult::Intercept(());
                                             }
+                                            pending_action = Some(action.clone());
+                                            return FilterResult::Intercept(());
+                                        }
+                                    }
+                                    if let Trigger::Modifiers = keybind.trigger {
+                                        if data.is_modifier_keysym(sym) && data.mods_match(&keybind.mods, modifiers) {
                                             pending_action = Some(action.clone());
                                             return FilterResult::Intercept(());
                                         }
@@ -146,7 +157,16 @@ impl AeroWM {
                 let keyboard = self.seat.get_keyboard().expect("Keyboard not found - this is a bug");
                 let pointer = self.seat.get_pointer().expect("No pointer/mouse connected or found");
 
-                self.cursor_position += event.delta();
+                let speed = self.config.input_config.pointer_speed;
+                let mut delta = event.delta();
+                if let Some(acceleration) = &self.config.input_config.pointer_acceleration {
+                    let accel = acceleration.call::<f64>(delta.x.hypot(delta.y)).expect("Couldn't call acceleration function");
+                    delta.x *= accel;
+                    delta.y *= accel;
+                }
+                self.cursor_position.x += delta.x * speed;
+                self.cursor_position.y += delta.y * speed;
+
                 let (_, _, zoom) = self.current_viewport();
 
                 let (min_x, min_y, max_x, max_y) = self.space.outputs()
