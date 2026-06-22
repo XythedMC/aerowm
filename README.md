@@ -130,6 +130,31 @@ bind("Alt+Shift",              "switch_layout")
 bind("Super+Alt+BackSpace", "quit")
 ```
 
+### Monitor configuration
+
+```lua
+monitor("DP-1", "0x0", 165.0, 1.0)
+monitor("HDMI-A-1", "2560x0", 75.0, 1.0)
+```
+
+Arguments: output name, position as `"WxH"`, refresh rate in Hz, scale factor.
+
+### Input configuration
+
+```lua
+input = {
+    layouts = {"us", "il"},   -- XKB layout names, cycled with switch_layout
+    repeat_rate = 25,         -- key repeats per second
+    repeat_delay = 600,       -- ms before repeat starts
+    pointer_speed = 1.0,      -- flat speed multiplier
+
+    -- optional: custom acceleration function, receives movement speed, returns multiplier
+    pointer_acceleration = function(speed)
+        return 1.0 + speed * 0.1
+    end,
+}
+```
+
 ### Keybind syntax
 
 ```lua
@@ -137,7 +162,7 @@ bind("Mod+Key", "action")
 bind("Mod+Key", "action", "argument")
 ```
 
-Modifiers: `Ctrl`, `Alt`, `Shift`, `Super`. Mouse buttons: `left`, `right`, `middle`.
+Modifiers: `Ctrl`, `Alt`, `Shift`, `Super`. Mouse buttons: `left`, `right`, `middle`. Modifier-only binds (e.g. `"Alt+Shift"`) are also supported.
 
 ### Actions
 
