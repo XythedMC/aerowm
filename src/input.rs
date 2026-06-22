@@ -4,7 +4,7 @@ use smithay::{
     }, desktop::{WindowSurfaceType, layer_map_for_output}, input::{
         keyboard::FilterResult,
         pointer::{AxisFrame, ButtonEvent, CursorIcon, CursorImageStatus, Focus, GrabStartData as PointerGrabStartData, MotionEvent},
-    }, reexports::{wayland_protocols::xdg::shell::server::xdg_toplevel::ResizeEdge, wayland_server::protocol::wl_surface::WlSurface}, utils::{Logical, Point, Rectangle, SERIAL_COUNTER}, wayland::shell::wlr_layer::KeyboardInteractivity,
+    }, reexports::{wayland_protocols::xdg::shell::server::xdg_toplevel::ResizeEdge, wayland_server::protocol::wl_surface::WlSurface}, utils::{Logical, Point, Rectangle, SERIAL_COUNTER}, wayland::{input_method::InputMethodSeat, shell::wlr_layer::KeyboardInteractivity},
 };
 
 use crate::{AeroWM, grabs::{PanCanvasGrab, ResizeSurfaceGrab}, keybind::{Action, Trigger}, state::{CanvasWindow, ModifierKey, ViewMode}};
@@ -84,42 +84,58 @@ impl AeroWM {
                 let mut pending_action: Option<Action> = None;
 
                 let keyboard = self.seat.get_keyboard().expect("Keyboard not found while trying to add it");
-                keyboard.input::<(), _>(
-                    self,
-                    event.key_code(),
-                    key_state,
-                    serial,
-                    time,
-                    |data, modifiers, handle| {
-                        let sym = handle.modified_sym();
+                let keyboard_grabbed = self.seat.input_method().keyboard_grabbed();
 
-                        if key_state == KeyState::Pressed {
-                            for (keybind, action) in &data.config.keybinds {
-                                if let Trigger::Key(keysym) = keybind.trigger {
-                                    if keysym == sym && data.mods_match(&keybind.mods, modifiers) {
-                                        if let Action::ShowAreas = action {
-                                            data.show_areas = true;
+                if !keyboard_grabbed {
+                    keyboard.input::<(), _>(
+                        self,
+                        event.key_code(),
+                        key_state,
+                        serial,
+                        time,
+                        |data, modifiers, handle| {
+                            let sym = handle.modified_sym();
+
+                            if key_state == KeyState::Pressed {
+                                for (keybind, action) in &data.config.keybinds {
+                                    if let Trigger::Key(keysym) = keybind.trigger {
+                                        if keysym == sym && data.mods_match(&keybind.mods, modifiers) {
+                                            if let Action::ShowAreas = action {
+                                                data.show_areas = true;
+                                                return FilterResult::Intercept(());
+                                            }
+                                            pending_action = Some(action.clone());
                                             return FilterResult::Intercept(());
                                         }
-                                        pending_action = Some(action.clone());
-                                        return FilterResult::Intercept(());
+                                    }
+                                }
+                            } else {
+                                for (keybind, action) in &data.config.keybinds {
+                                    if let (Trigger::Key(keysym), Action::ShowAreas) = (&keybind.trigger, action) {
+                                        if *keysym == sym {
+                                            data.show_areas = false;
+                                            break;
+                                        }
                                     }
                                 }
                             }
-                        } else {
-                            for (keybind, action) in &data.config.keybinds {
-                                if let (Trigger::Key(keysym), Action::ShowAreas) = (&keybind.trigger, action) {
-                                    if *keysym == sym {
-                                        data.show_areas = false;
-                                        break;
-                                    }
-                                }
-                            }
-                        }
 
-                        FilterResult::Forward
-                    },
-                );
+                            FilterResult::Forward
+                        },
+                    );
+                } else {
+                    keyboard.input::<(), _>(
+                        self, 
+                        event.key_code(), 
+                        key_state, 
+                        serial, 
+                        time, 
+                        |_, _, _| 
+                        {
+                            return FilterResult::Forward;
+                        }
+                    );
+                }
 
                 if let Some(action) = pending_action {
                     self.dispatch_action(&action);

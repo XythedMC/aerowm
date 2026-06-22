@@ -8,15 +8,15 @@ mod xwayland;
 use crate::AeroWM;
 
 use smithay::{
-    backend::allocator::dmabuf::Dmabuf, delegate_data_control, delegate_data_device, delegate_dmabuf, delegate_fractional_scale, delegate_idle_inhibit, delegate_idle_notify, delegate_image_capture_source, delegate_image_copy_capture, delegate_output, delegate_output_capture_source, delegate_primary_selection, delegate_seat, delegate_viewporter, delegate_xdg_activation, delegate_xdg_decoration, delegate_xwayland_shell, input::{
+    backend::allocator::dmabuf::Dmabuf, delegate_data_control, delegate_data_device, delegate_dmabuf, delegate_fractional_scale, delegate_idle_inhibit, delegate_idle_notify, delegate_image_capture_source, delegate_image_copy_capture, delegate_input_method_manager, delegate_output, delegate_output_capture_source, delegate_primary_selection, delegate_seat, delegate_text_input_manager, delegate_viewporter, delegate_xdg_activation, delegate_xdg_decoration, delegate_xwayland_shell, desktop::{PopupKind, PopupManager}, input::{
         Seat, SeatHandler, SeatState,
         dnd::{DnDGrab, DndGrabHandler, GrabType, Source},
         pointer::Focus,
     }, output::WeakOutput, reexports::{
         wayland_protocols::xdg::decoration::zv1::server::zxdg_toplevel_decoration_v1,
         wayland_server::{Resource, protocol::{wl_shm::Format, wl_surface::WlSurface}},
-    }, utils::{Buffer, Serial, Size}, wayland::{
-        dmabuf::{DmabufHandler, DmabufState, ImportNotifier}, fractional_scale::FractionalScaleHandler, idle_inhibit::IdleInhibitHandler, idle_notify::{IdleNotifierHandler, IdleNotifierState}, image_capture_source::{ImageCaptureSource, ImageCaptureSourceHandler, OutputCaptureSourceHandler, OutputCaptureSourceState}, image_copy_capture::{BufferConstraints, Frame, ImageCopyCaptureHandler, ImageCopyCaptureState, Session, SessionRef}, output::OutputHandler, selection::{
+    }, utils::{Buffer, Logical, Rectangle, Serial, Size}, wayland::{
+        dmabuf::{DmabufHandler, DmabufState, ImportNotifier}, fractional_scale::FractionalScaleHandler, idle_inhibit::IdleInhibitHandler, idle_notify::{IdleNotifierHandler, IdleNotifierState}, image_capture_source::{ImageCaptureSource, ImageCaptureSourceHandler, OutputCaptureSourceHandler, OutputCaptureSourceState}, image_copy_capture::{BufferConstraints, Frame, ImageCopyCaptureHandler, ImageCopyCaptureState, Session, SessionRef}, input_method::{InputMethodHandler, PopupSurface}, output::OutputHandler, seat::WaylandFocus, selection::{
             SelectionHandler,
             data_device::{DataDeviceHandler, DataDeviceState, WaylandDndGrabHandler, set_data_device_focus},
             primary_selection::{PrimarySelectionHandler, PrimarySelectionState, set_primary_focus},
@@ -172,6 +172,7 @@ impl IdleNotifierHandler for AeroWM {
         &mut self.idle_notifier_state
     }
 }
+delegate_idle_notify!(AeroWM);
 
 impl IdleInhibitHandler for AeroWM {
     fn inhibit(&mut self, _surface: WlSurface) {
@@ -182,14 +183,17 @@ impl IdleInhibitHandler for AeroWM {
         self.idle_notifier_state.set_is_inhibited(false);
     }
 }
+delegate_idle_inhibit!(AeroWM);
 
 impl DataControlHandler for AeroWM {
     fn data_control_state(&mut self) -> &mut DataControlState {
         &mut self.data_control_state
     }
 }
+delegate_data_control!(AeroWM);
 
 impl ImageCaptureSourceHandler for AeroWM { }
+delegate_image_capture_source!(AeroWM);
 
 impl OutputCaptureSourceHandler for AeroWM {
     fn output_capture_source_state(&mut self) -> &mut OutputCaptureSourceState {
@@ -200,6 +204,7 @@ impl OutputCaptureSourceHandler for AeroWM {
         source.user_data().insert_if_missing(|| output.downgrade());
     }
 }
+delegate_output_capture_source!(AeroWM);
 
 impl ImageCopyCaptureHandler for AeroWM {
     fn image_copy_capture_state(&mut self) -> &mut ImageCopyCaptureState {
@@ -229,10 +234,29 @@ impl ImageCopyCaptureHandler for AeroWM {
         self.pending_screencopy_frames.push((output, frame));
     }
 }
-
-delegate_idle_notify!(AeroWM);
-delegate_idle_inhibit!(AeroWM);
-delegate_data_control!(AeroWM);
-delegate_image_capture_source!(AeroWM);
-delegate_output_capture_source!(AeroWM);
 delegate_image_copy_capture!(AeroWM);
+
+impl InputMethodHandler for AeroWM {
+    fn new_popup(&mut self, surface: PopupSurface) {
+        if let Err(err) = self.popups.track_popup(PopupKind::from(surface)) {
+            eprintln!("Failed to track popup: {}", err);
+        }
+    }
+
+    fn dismiss_popup(&mut self, surface: PopupSurface) {
+        if let Some(parent) = surface.get_parent().map(|parent| parent.surface.clone()) {
+            let _ = PopupManager::dismiss_popup(&parent, &PopupKind::from(surface));
+        }
+    }
+
+    fn popup_repositioned(&mut self, _surface: PopupSurface) { }
+
+    fn parent_geometry(&self, parent: &WlSurface) -> Rectangle<i32, Logical> {
+        self.space
+            .elements()
+            .find_map(|w| (w.wl_surface().as_deref() == Some(parent)).then(|| w.geometry()))
+            .unwrap_or_default()
+    }
+}
+delegate_input_method_manager!(AeroWM);
+delegate_text_input_manager!(AeroWM);

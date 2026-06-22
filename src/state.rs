@@ -28,9 +28,9 @@ use smithay::{
             protocol::wl_surface::WlSurface
         }
     }, utils::{DeviceFd, Logical, Point, Rectangle, SERIAL_COUNTER, Size, Transform}, wayland::{
-        compositor::{self, CompositorClientState, CompositorState}, cursor_shape::CursorShapeManagerState, dmabuf::{DmabufState, ImportNotifier}, fractional_scale::FractionalScaleManagerState, idle_inhibit::IdleInhibitManagerState, idle_notify::IdleNotifierState, image_capture_source::{ImageCaptureSourceState, OutputCaptureSourceState}, image_copy_capture::{Frame as ScreencopyFrame, ImageCopyCaptureState, Session}, output::OutputManagerState, selection::{
+        compositor::{self, CompositorClientState, CompositorState}, cursor_shape::CursorShapeManagerState, dmabuf::{DmabufState, ImportNotifier}, fractional_scale::FractionalScaleManagerState, idle_inhibit::IdleInhibitManagerState, idle_notify::IdleNotifierState, image_capture_source::{ImageCaptureSourceState, OutputCaptureSourceState}, image_copy_capture::{Frame as ScreencopyFrame, ImageCopyCaptureState, Session}, input_method::InputMethodManagerState, output::OutputManagerState, selection::{
             data_device::DataDeviceState, primary_selection::PrimarySelectionState, wlr_data_control::DataControlState
-        }, shell::{wlr_layer::WlrLayerShellState, xdg::{XdgShellState, XdgToplevelSurfaceRoleAttributes, decoration::XdgDecorationState}}, shm::{ShmState, with_buffer_contents_mut}, socket::ListeningSocketSource, viewporter::ViewporterState, xdg_activation::XdgActivationState, xwayland_shell::XWaylandShellState
+        }, shell::{wlr_layer::WlrLayerShellState, xdg::{XdgShellState, XdgToplevelSurfaceRoleAttributes, decoration::XdgDecorationState}}, shm::{ShmState, with_buffer_contents_mut}, socket::ListeningSocketSource, text_input::TextInputManagerState, viewporter::ViewporterState, xdg_activation::XdgActivationState, xwayland_shell::XWaylandShellState
     }, xwayland::{X11Wm, XWayland, XWaylandEvent}
 };
 
@@ -252,6 +252,8 @@ pub struct AeroWM {
     pub image_capture_source_state: ImageCaptureSourceState,
     pub output_capture_source_state: OutputCaptureSourceState,
     pub image_copy_capture_state: ImageCopyCaptureState,
+    pub input_method_manager_state: InputMethodManagerState,
+    pub text_input_manager_state: TextInputManagerState,
     pub popups: PopupManager,
 
     pub pending_screencopy_frames: Vec<(Output, ScreencopyFrame)>,
@@ -296,10 +298,12 @@ impl AeroWM {
         let data_device_state = DataDeviceState::new::<Self>(&dh);
         let idle_notifier_state = IdleNotifierState::new(&dh, event_loop.handle());
         let idle_inhibit_manager_state = IdleInhibitManagerState::new::<Self>(&dh);
-        let data_control_state = DataControlState::new::<AeroWM, _>(&dh, None, |_| true);
+        let data_control_state = DataControlState::new::<Self, _>(&dh, None, |_| true);
         let image_capture_source_state = ImageCaptureSourceState::new();
         let output_capture_source_state = OutputCaptureSourceState::new::<Self>(&dh);
         let image_copy_capture_state = ImageCopyCaptureState::new::<Self>(&dh);
+        let input_method_manager_state = InputMethodManagerState::new::<Self, _>(&dh, |_| true);
+        let text_input_manager_state = TextInputManagerState::new::<Self>(&dh);
         let popups = PopupManager::default();
 
         let pending_screencopy_frames = Vec::new();
@@ -404,6 +408,8 @@ impl AeroWM {
             image_capture_source_state,
             image_copy_capture_state,
             output_capture_source_state,
+            input_method_manager_state,
+            text_input_manager_state,
             popups,
             pending_screencopy_frames,
             screencopy_sessions: Vec::new(),
