@@ -18,6 +18,8 @@ AeroWM organises windows in a tree structure. You can work in a focused **tiling
 - **Hover to focus** - optional focus-follows-mouse
 - **Scratchpad** - floating windows that live outside the tree, toggled in and out of view
 - **Idle notify** - ext-idle-notify and zwp-idle-inhibit protocol support
+- **Screencopy** - ext-image-copy-capture protocol support for screenshot and screen recording tools
+- **Clipboard manager** - wlr-data-control protocol support
 - **Background** - solid colour, image, or custom GLSL shader
 - **XWayland support** - run X11 applications alongside native Wayland clients
 - **Areas** - define named rectangular regions on the canvas and jump to them instantly
@@ -145,15 +147,15 @@ Modifiers: `Ctrl`, `Alt`, `Shift`, `Super`. Mouse buttons: `left`, `right`, `mid
 
 - ~~**XWayland support** - compatibility with X11 applications~~
 - ~~**Multi-output support** - multiple monitors~~
-- **wlr protocols** - layer shell (bars, docks, notifications), screencopy, data control, idle notify, session lock
+- **wlr protocols** - layer shell (bars, docks, notifications), ~~screencopy~~, ~~data control~~, ~~idle notify~~, session lock
 - ~~**Background images and shaders** - image backgrounds and custom GLSL shaders~~
 - ~~**Trackpad support** - gestures for panning, zooming, and switching views~~
 - **Animations** - window open/close transitions
 - ~~**Scratchpad** - floating windows outside the tree~~
 - **Window rules** - auto-assign apps to positions or parents on launch
 - ~~**IPC** - full external control protocol over the Unix socket~~
-- **Screenshot/screencopy** - wlr-screencopy protocol support
-- **Clipboard manager support** - wlr-data-control protocol
+- ~~**Screenshot/screencopy** - wlr-screencopy protocol support~~
+- ~~**Clipboard manager support** - wlr-data-control protocol~~
 - ~~**Idle/lock screen** - ext-idle-notify and ext-session-lock support~~ (idle notify + inhibit done; session lock pending)
 - ~~**Config hot-reload** - reload the Lua config without restarting~~
 - **Multi-language input** - IME support for non-Latin scripts

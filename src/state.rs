@@ -27,10 +27,10 @@ use smithay::{
             backend::{ClientData, ClientId, DisconnectReason}, 
             protocol::wl_surface::WlSurface
         }
-    }, utils::{DeviceFd, Logical, Point, Rectangle, SERIAL_COUNTER, Size}, wayland::{
-        compositor::{self, CompositorClientState, CompositorState}, cursor_shape::CursorShapeManagerState, dmabuf::{DmabufState, ImportNotifier}, fractional_scale::FractionalScaleManagerState, idle_inhibit::IdleInhibitManagerState, idle_notify::IdleNotifierState, output::OutputManagerState, selection::{
-            data_device::DataDeviceState, wlr_data_control::DataControlState, primary_selection::PrimarySelectionState
-        }, shell::{wlr_layer::WlrLayerShellState, xdg::{XdgShellState, XdgToplevelSurfaceRoleAttributes, decoration::XdgDecorationState}}, shm::ShmState, socket::ListeningSocketSource, viewporter::ViewporterState, xdg_activation::XdgActivationState, xwayland_shell::XWaylandShellState
+    }, utils::{DeviceFd, Logical, Point, Rectangle, SERIAL_COUNTER, Size, Transform}, wayland::{
+        compositor::{self, CompositorClientState, CompositorState}, cursor_shape::CursorShapeManagerState, dmabuf::{DmabufState, ImportNotifier}, fractional_scale::FractionalScaleManagerState, idle_inhibit::IdleInhibitManagerState, idle_notify::IdleNotifierState, image_capture_source::{ImageCaptureSourceState, OutputCaptureSourceState}, image_copy_capture::{Frame as ScreencopyFrame, ImageCopyCaptureState, Session}, output::OutputManagerState, selection::{
+            data_device::DataDeviceState, primary_selection::PrimarySelectionState, wlr_data_control::DataControlState
+        }, shell::{wlr_layer::WlrLayerShellState, xdg::{XdgShellState, XdgToplevelSurfaceRoleAttributes, decoration::XdgDecorationState}}, shm::{ShmState, with_buffer_contents_mut}, socket::ListeningSocketSource, viewporter::ViewporterState, xdg_activation::XdgActivationState, xwayland_shell::XWaylandShellState
     }, xwayland::{X11Wm, XWayland, XWaylandEvent}
 };
 
@@ -42,7 +42,7 @@ use crate::{
     rendering::build_render_elements,
     ipc::{IpcEvent, InternalCommand, TreeWindow, TreeViewport, TreeResponse, AreasResponse, MonitorsResponse, MonitorInfo},
 };
-use image::ImageReader;
+use image::{ImageReader};
 
 smithay::backend::renderer::element::render_elements! {
     pub AeroWMElement <=GlesRenderer>;
@@ -249,8 +249,13 @@ pub struct AeroWM {
     pub idle_notifier_state: IdleNotifierState<Self>,
     pub idle_inhibit_manager_state: IdleInhibitManagerState,
     pub data_control_state: DataControlState,
+    pub image_capture_source_state: ImageCaptureSourceState,
+    pub output_capture_source_state: OutputCaptureSourceState,
+    pub image_copy_capture_state: ImageCopyCaptureState,
     pub popups: PopupManager,
 
+    pub pending_screencopy_frames: Vec<(Output, ScreencopyFrame)>,
+    pub screencopy_sessions: Vec<Session>,
     pub seat: Seat<Self>,
 
     // IPC
@@ -292,8 +297,12 @@ impl AeroWM {
         let idle_notifier_state = IdleNotifierState::new(&dh, event_loop.handle());
         let idle_inhibit_manager_state = IdleInhibitManagerState::new::<Self>(&dh);
         let data_control_state = DataControlState::new::<AeroWM, _>(&dh, None, |_| true);
+        let image_capture_source_state = ImageCaptureSourceState::new();
+        let output_capture_source_state = OutputCaptureSourceState::new::<Self>(&dh);
+        let image_copy_capture_state = ImageCopyCaptureState::new::<Self>(&dh);
         let popups = PopupManager::default();
 
+        let pending_screencopy_frames = Vec::new();
         let mut seat_state = SeatState::new();
         let mut seat: Seat<Self> = seat_state.new_wl_seat(&dh, "winit");
         seat.add_keyboard(Default::default(), 200, 25).expect("Keyboard not found while trying to add it");
@@ -392,7 +401,12 @@ impl AeroWM {
             idle_notifier_state,
             idle_inhibit_manager_state,
             data_control_state,
+            image_capture_source_state,
+            image_copy_capture_state,
+            output_capture_source_state,
             popups,
+            pending_screencopy_frames,
+            screencopy_sessions: Vec::new(),
             seat,
             event_tx: None,
             main_modifier,
@@ -956,7 +970,8 @@ impl AeroWM {
 
                 let color = self.config.background_color;
                 let clear_color = color.map(|x| x as f32 / 255.0);
-
+                
+                let (sw, sh) = (self.output_size().0 as i32, self.output_size().1 as i32);
                 let output_name = self.gpu.get(&device_id)
                     .and_then(|gpu| gpu.crtc_to_output.get(&handle))
                     .map(|o| o.name());
@@ -1083,12 +1098,6 @@ impl AeroWM {
                 }
 
                 if self.pending_screenshot {
-                    let (sw, sh) = self.space
-                        .outputs()
-                        .next()
-                        .and_then(|o| self.space.output_geometry(o))
-                        .map(|g| (g.size.w, g.size.h))
-                        .unwrap_or((1920, 1080));
                     let mut pixels = vec![0u8; (sw * sh * 4) as usize];
                     let _ = renderer.with_context(|gl| unsafe {
                         gl.ReadPixels(
@@ -1111,6 +1120,34 @@ impl AeroWM {
                     self.pending_screenshot = false;
                     self.loop_signal.stop();
                 }
+
+                let all = std::mem::take(&mut self.pending_screencopy_frames);
+                let (mine, rest): (Vec<(Output, ScreencopyFrame)>, Vec<(Output, ScreencopyFrame)>) = all.into_iter().partition(|(o, _)| o == output.unwrap());
+                self.pending_screencopy_frames = rest;
+
+                for (output, frame) in mine {
+                    let (width, height) = output.current_mode().unwrap().size.into();
+                    let mut pixels = vec![0u8; (width * height * 4) as usize];
+                    let _ = renderer.with_context(|gl| unsafe {
+                        gl.ReadPixels(
+                            0, 0, width, height,
+                            ffi::RGBA,
+                            ffi::UNSIGNED_BYTE,
+                            pixels.as_mut_ptr() as *mut _,
+                        );
+                    });
+                    let _ = with_buffer_contents_mut(&frame.buffer(), |ptr, _len, _data| {
+                        for i in 0..(width*height) as usize {
+                            unsafe {
+                                ptr.add(i*4).write(pixels[i*4 + 2]);
+                                ptr.add(i*4+1).write(pixels[i*4 + 1]);
+                                ptr.add(i*4+2).write(pixels[i*4]);
+                                ptr.add(i*4+3).write(pixels[i*4 + 3]);
+                            }
+                        }
+                    });
+                    frame.success(Transform::Normal, None, self.start_time.elapsed());
+                }   
 
                 self.space.elements().for_each(|window| {
                     window.send_frame(

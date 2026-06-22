@@ -8,36 +8,21 @@ mod xwayland;
 use crate::AeroWM;
 
 use smithay::{
-    backend::allocator::dmabuf::Dmabuf,
-    input::{
+    backend::allocator::dmabuf::Dmabuf, delegate_data_control, delegate_data_device, delegate_dmabuf, delegate_fractional_scale, delegate_idle_inhibit, delegate_idle_notify, delegate_image_capture_source, delegate_image_copy_capture, delegate_output, delegate_output_capture_source, delegate_primary_selection, delegate_seat, delegate_viewporter, delegate_xdg_activation, delegate_xdg_decoration, delegate_xwayland_shell, input::{
         Seat, SeatHandler, SeatState,
         dnd::{DnDGrab, DndGrabHandler, GrabType, Source},
         pointer::Focus,
-    },
-    reexports::{
+    }, output::WeakOutput, reexports::{
         wayland_protocols::xdg::decoration::zv1::server::zxdg_toplevel_decoration_v1,
-        wayland_server::{Resource, protocol::wl_surface::WlSurface},
-    },
-    utils::Serial,
-    wayland::{
-        dmabuf::{DmabufHandler, DmabufState, ImportNotifier},
-        fractional_scale::FractionalScaleHandler,
-        idle_inhibit::IdleInhibitHandler,
-        idle_notify::{IdleNotifierHandler, IdleNotifierState},
-        output::OutputHandler,
-        selection::{
+        wayland_server::{Resource, protocol::{wl_shm::Format, wl_surface::WlSurface}},
+    }, utils::{Buffer, Serial, Size}, wayland::{
+        dmabuf::{DmabufHandler, DmabufState, ImportNotifier}, fractional_scale::FractionalScaleHandler, idle_inhibit::IdleInhibitHandler, idle_notify::{IdleNotifierHandler, IdleNotifierState}, image_capture_source::{ImageCaptureSource, ImageCaptureSourceHandler, OutputCaptureSourceHandler, OutputCaptureSourceState}, image_copy_capture::{BufferConstraints, Frame, ImageCopyCaptureHandler, ImageCopyCaptureState, Session, SessionRef}, output::OutputHandler, selection::{
             SelectionHandler,
             data_device::{DataDeviceHandler, DataDeviceState, WaylandDndGrabHandler, set_data_device_focus},
             primary_selection::{PrimarySelectionHandler, PrimarySelectionState, set_primary_focus},
             wlr_data_control::{DataControlHandler, DataControlState},
-        },
-        shell::xdg::{ToplevelSurface, decoration::XdgDecorationHandler},
-        xdg_activation::{XdgActivationHandler, XdgActivationState, XdgActivationToken, XdgActivationTokenData},
-    },
-    delegate_data_control, delegate_data_device, delegate_dmabuf, delegate_fractional_scale,
-    delegate_idle_inhibit, delegate_idle_notify, delegate_output, delegate_primary_selection,
-    delegate_seat, delegate_viewporter, delegate_xdg_activation, delegate_xdg_decoration,
-    delegate_xwayland_shell,
+        }, shell::xdg::{ToplevelSurface, decoration::XdgDecorationHandler}, xdg_activation::{XdgActivationHandler, XdgActivationState, XdgActivationToken, XdgActivationTokenData}
+    }
 };
 
 impl SeatHandler for AeroWM {
@@ -204,6 +189,50 @@ impl DataControlHandler for AeroWM {
     }
 }
 
+impl ImageCaptureSourceHandler for AeroWM { }
+
+impl OutputCaptureSourceHandler for AeroWM {
+    fn output_capture_source_state(&mut self) -> &mut OutputCaptureSourceState {
+        &mut self.output_capture_source_state
+    }
+
+    fn output_source_created(&mut self, source: ImageCaptureSource, output: &smithay::output::Output) {
+        source.user_data().insert_if_missing(|| output.downgrade());
+    }
+}
+
+impl ImageCopyCaptureHandler for AeroWM {
+    fn image_copy_capture_state(&mut self) -> &mut ImageCopyCaptureState {
+        &mut self.image_copy_capture_state
+    }
+
+    fn capture_constraints(&mut self, source: &ImageCaptureSource) -> Option<BufferConstraints> {
+        let Some(output) = source.user_data().get::<WeakOutput>().and_then(|w| w.upgrade()) else { return None; };
+        let mode = output.current_mode()?;
+        let size: Size<i32, Buffer> = Size::from((mode.size.w, mode.size.h));
+        let formats = vec![Format::Xrgb8888, Format::Argb8888];
+        Some(BufferConstraints { 
+            size: size, 
+            shm: formats, 
+            dma: None,
+        })
+    }
+
+    fn new_session(&mut self, session: Session) {
+        // AeroWM doesnt track sessions so empty body
+        self.screencopy_sessions.push(session);
+    }
+
+    fn frame(&mut self, session: &SessionRef, frame: Frame) {
+        eprintln!("framing frame to frame framers");
+        let Some(output) = session.source().user_data().get::<WeakOutput>().and_then(|w| w.upgrade()) else { return; };
+        self.pending_screencopy_frames.push((output, frame));
+    }
+}
+
 delegate_idle_notify!(AeroWM);
 delegate_idle_inhibit!(AeroWM);
 delegate_data_control!(AeroWM);
+delegate_image_capture_source!(AeroWM);
+delegate_output_capture_source!(AeroWM);
+delegate_image_copy_capture!(AeroWM);
