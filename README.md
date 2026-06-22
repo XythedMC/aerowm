@@ -66,7 +66,7 @@ The config file lives at `~/.config/aerowm/aerowm.lua`. If it doesn't exist, Aer
 
 ```lua
 config = {
-    main_modifier = "Ctrl",
+    main_modifier = "Super",
     gap = 80.0,
     focused_border_color = '#4090c2',
     unfocused_border_color = '#000000',
@@ -95,25 +95,39 @@ config = {
     launch_rules = {},
 }
 
+input = {
+    layouts = {"us"},
+    repeat_rate = 25,
+    repeat_delay = 600,
+    pointer_speed = 1.0,
+}
+
+local mainMod = "Super"
+
 -- Keybinds
-bind("Ctrl+Return", "exec", "terminal")
-bind("Ctrl+W",      "exec", "browser")
-bind("Ctrl+Q",      "close")
-bind("Ctrl+F",      "fullscreen")
-bind("Ctrl+Space",  "switch_view")
+bind(mainMod .. "+Return", "exec", "terminal")
+bind(mainMod .. "+W",      "exec", "browser")
+bind(mainMod .. "+Q",      "close")
+bind(mainMod .. "+F",      "fullscreen")
+bind(mainMod .. "+Space",  "switch_view")
 
-bind("Ctrl+P",      "parent")
-bind("Ctrl+N",      "sibling")
-bind("Ctrl+C",      "child")
-bind("Ctrl+Z",      "focus_zoom")
-bind("Ctrl+Home",   "reset_view")
+bind(mainMod .. "+P",      "parent")
+bind(mainMod .. "+N",      "sibling")
+bind(mainMod .. "+C",      "child")
+bind(mainMod .. "+Z",      "focus_zoom")
+bind(mainMod .. "+Home",   "reset_view")
 
-bind("Ctrl+Left",   "pan", "-100 0")
-bind("Ctrl+Right",  "pan", "100 0")
-bind("Ctrl+Up",     "pan", "0 -100")
-bind("Ctrl+Down",   "pan", "0 100")
+bind(mainMod .. "+Left",   "pan", "-100 0")
+bind(mainMod .. "+Right",  "pan", "100 0")
+bind(mainMod .. "+Up",     "pan", "0 -100")
+bind(mainMod .. "+Down",   "pan", "0 100")
 
-bind("Ctrl+Alt+BackSpace", "quit")
+bind(mainMod .. "+S",         "send_to_scratchpad")
+bind(mainMod .. "+Shift+S",   "toggle_scratchpad")
+
+bind("Alt+Shift",              "switch_layout")
+
+bind("Super+Alt+BackSpace", "quit")
 ```
 
 ### Keybind syntax
@@ -145,6 +159,9 @@ Modifiers: `Ctrl`, `Alt`, `Shift`, `Super`. Mouse buttons: `left`, `right`, `mid
 | `goto_area` | area number | Animate the viewport to fill the given area |
 | `remove_area` | | Remove the currently active area |
 | `show_areas` | | Hold to show area outlines on the canvas |
+| `send_to_scratchpad` | | Move the focused window to the scratchpad |
+| `toggle_scratchpad` | | Show or hide the scratchpad window |
+| `switch_layout` | | Cycle to the next XKB keyboard layout |
 
 ## Planned / In Progress
 
