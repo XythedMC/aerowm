@@ -4,31 +4,41 @@ pub mod config;
 pub mod cursor_shape;
 pub mod tablet;
 pub mod layer_shell;
-pub mod protocols;
 mod xwayland;
 use crate::AeroWM;
 
-use smithay::input::dnd::{DnDGrab, DndGrabHandler, GrabType, Source};
-use smithay::input::pointer::Focus;
-use smithay::input::{Seat, SeatHandler, SeatState};
-use smithay::reexports::wayland_server::Resource;
-use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
-use smithay::utils::Serial;
-use smithay::wayland::output::OutputHandler;
-use smithay::wayland::selection::SelectionHandler;
-use smithay::wayland::selection::data_device::{
-    DataDeviceHandler, DataDeviceState, WaylandDndGrabHandler, set_data_device_focus,
+use smithay::{
+    backend::allocator::dmabuf::Dmabuf,
+    input::{
+        Seat, SeatHandler, SeatState,
+        dnd::{DnDGrab, DndGrabHandler, GrabType, Source},
+        pointer::Focus,
+    },
+    reexports::{
+        wayland_protocols::xdg::decoration::zv1::server::zxdg_toplevel_decoration_v1,
+        wayland_server::{Resource, protocol::wl_surface::WlSurface},
+    },
+    utils::Serial,
+    wayland::{
+        dmabuf::{DmabufHandler, DmabufState, ImportNotifier},
+        fractional_scale::FractionalScaleHandler,
+        idle_inhibit::IdleInhibitHandler,
+        idle_notify::{IdleNotifierHandler, IdleNotifierState},
+        output::OutputHandler,
+        selection::{
+            SelectionHandler,
+            data_device::{DataDeviceHandler, DataDeviceState, WaylandDndGrabHandler, set_data_device_focus},
+            primary_selection::{PrimarySelectionHandler, PrimarySelectionState, set_primary_focus},
+            wlr_data_control::{DataControlHandler, DataControlState},
+        },
+        shell::xdg::{ToplevelSurface, decoration::XdgDecorationHandler},
+        xdg_activation::{XdgActivationHandler, XdgActivationState, XdgActivationToken, XdgActivationTokenData},
+    },
+    delegate_data_control, delegate_data_device, delegate_dmabuf, delegate_fractional_scale,
+    delegate_idle_inhibit, delegate_idle_notify, delegate_output, delegate_primary_selection,
+    delegate_seat, delegate_viewporter, delegate_xdg_activation, delegate_xdg_decoration,
+    delegate_xwayland_shell,
 };
-use smithay::wayland::selection::primary_selection::{PrimarySelectionHandler, PrimarySelectionState, set_primary_focus};
-use smithay::wayland::shell::xdg::decoration::XdgDecorationHandler;
-use smithay::wayland::shell::xdg::ToplevelSurface;
-use smithay::wayland::xdg_activation::{XdgActivationHandler, XdgActivationState, XdgActivationToken, XdgActivationTokenData};
-use smithay::wayland::fractional_scale::FractionalScaleHandler;
-use smithay::wayland::dmabuf::{DmabufHandler, DmabufState, ImportNotifier};
-use smithay::reexports::wayland_protocols::xdg::decoration::zv1::server::zxdg_toplevel_decoration_v1;
-use smithay::backend::allocator::dmabuf::Dmabuf;
-use smithay::{delegate_data_device, delegate_output, delegate_seat, delegate_primary_selection, delegate_xwayland_shell};
-use smithay::{delegate_xdg_decoration, delegate_xdg_activation, delegate_viewporter, delegate_fractional_scale, delegate_dmabuf};
 
 impl SeatHandler for AeroWM {
     type KeyboardFocus = WlSurface;
@@ -171,3 +181,29 @@ impl DmabufHandler for AeroWM {
     }
 }
 delegate_dmabuf!(AeroWM);
+
+impl IdleNotifierHandler for AeroWM {
+    fn idle_notifier_state(&mut self) -> &mut IdleNotifierState<Self> {
+        &mut self.idle_notifier_state
+    }
+}
+
+impl IdleInhibitHandler for AeroWM {
+    fn inhibit(&mut self, _surface: WlSurface) {
+        self.idle_notifier_state.set_is_inhibited(true);
+    }
+
+    fn uninhibit(&mut self, _surface: WlSurface) {
+        self.idle_notifier_state.set_is_inhibited(false);
+    }
+}
+
+impl DataControlHandler for AeroWM {
+    fn data_control_state(&mut self) -> &mut DataControlState {
+        &mut self.data_control_state
+    }
+}
+
+delegate_idle_notify!(AeroWM);
+delegate_idle_inhibit!(AeroWM);
+delegate_data_control!(AeroWM);

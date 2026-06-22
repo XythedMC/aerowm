@@ -29,8 +29,7 @@ use smithay::{
         }
     }, utils::{DeviceFd, Logical, Point, Rectangle, SERIAL_COUNTER, Size}, wayland::{
         compositor::{self, CompositorClientState, CompositorState}, cursor_shape::CursorShapeManagerState, dmabuf::{DmabufState, ImportNotifier}, fractional_scale::FractionalScaleManagerState, idle_inhibit::IdleInhibitManagerState, idle_notify::IdleNotifierState, output::OutputManagerState, selection::{
-            data_device::DataDeviceState,
-            primary_selection::PrimarySelectionState,
+            data_device::DataDeviceState, wlr_data_control::DataControlState, primary_selection::PrimarySelectionState
         }, shell::{wlr_layer::WlrLayerShellState, xdg::{XdgShellState, XdgToplevelSurfaceRoleAttributes, decoration::XdgDecorationState}}, shm::ShmState, socket::ListeningSocketSource, viewporter::ViewporterState, xdg_activation::XdgActivationState, xwayland_shell::XWaylandShellState
     }, xwayland::{X11Wm, XWayland, XWaylandEvent}
 };
@@ -249,6 +248,7 @@ pub struct AeroWM {
     pub data_device_state: DataDeviceState,
     pub idle_notifier_state: IdleNotifierState<Self>,
     pub idle_inhibit_manager_state: IdleInhibitManagerState,
+    pub data_control_state: DataControlState,
     pub popups: PopupManager,
 
     pub seat: Seat<Self>,
@@ -291,6 +291,7 @@ impl AeroWM {
         let data_device_state = DataDeviceState::new::<Self>(&dh);
         let idle_notifier_state = IdleNotifierState::new(&dh, event_loop.handle());
         let idle_inhibit_manager_state = IdleInhibitManagerState::new::<Self>(&dh);
+        let data_control_state = DataControlState::new::<AeroWM, _>(&dh, None, |_| true);
         let popups = PopupManager::default();
 
         let mut seat_state = SeatState::new();
@@ -390,6 +391,7 @@ impl AeroWM {
             data_device_state,
             idle_notifier_state,
             idle_inhibit_manager_state,
+            data_control_state,
             popups,
             seat,
             event_tx: None,
