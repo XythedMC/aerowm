@@ -4,6 +4,7 @@ pub mod config;
 pub mod cursor_shape;
 pub mod tablet;
 pub mod layer_shell;
+pub mod protocols;
 mod xwayland;
 use crate::AeroWM;
 

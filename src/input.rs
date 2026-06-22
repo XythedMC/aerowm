@@ -74,6 +74,7 @@ impl AeroWM {
     }
 
     pub fn process_input_event<I: InputBackend>(&mut self, event: InputEvent<I>) { 
+        self.idle_notifier_state.notify_activity(&self.seat);
         match event {
             InputEvent::Keyboard { event, .. } => {
                 let serial = SERIAL_COUNTER.next_serial();

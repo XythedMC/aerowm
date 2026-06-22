@@ -28,20 +28,10 @@ use smithay::{
             protocol::wl_surface::WlSurface
         }
     }, utils::{DeviceFd, Logical, Point, Rectangle, SERIAL_COUNTER, Size}, wayland::{
-        compositor::{self, CompositorClientState, CompositorState}, 
-        cursor_shape::CursorShapeManagerState, 
-        dmabuf::{DmabufState, ImportNotifier}, 
-        fractional_scale::FractionalScaleManagerState, 
-        output::OutputManagerState, 
-        selection::{
+        compositor::{self, CompositorClientState, CompositorState}, cursor_shape::CursorShapeManagerState, dmabuf::{DmabufState, ImportNotifier}, fractional_scale::FractionalScaleManagerState, idle_inhibit::IdleInhibitManagerState, idle_notify::IdleNotifierState, output::OutputManagerState, selection::{
             data_device::DataDeviceState,
             primary_selection::PrimarySelectionState,
-        }, 
-        shell::{wlr_layer::WlrLayerShellState, xdg::{XdgShellState, XdgToplevelSurfaceRoleAttributes, decoration::XdgDecorationState}}, 
-        shm::ShmState, 
-        socket::ListeningSocketSource, 
-        viewporter::ViewporterState, 
-        xdg_activation::XdgActivationState, xwayland_shell::XWaylandShellState,
+        }, shell::{wlr_layer::WlrLayerShellState, xdg::{XdgShellState, XdgToplevelSurfaceRoleAttributes, decoration::XdgDecorationState}}, shm::ShmState, socket::ListeningSocketSource, viewporter::ViewporterState, xdg_activation::XdgActivationState, xwayland_shell::XWaylandShellState
     }, xwayland::{X11Wm, XWayland, XWaylandEvent}
 };
 
@@ -71,8 +61,7 @@ pub enum ViewMode {
     TreeView,
     Fullscreen,
 }
-#[derive(Clone, Copy, Debug)]
-#[derive(PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum ModifierKey {
     Ctrl,
     Alt,
@@ -258,6 +247,8 @@ pub struct AeroWM {
     pub output_manager_state: OutputManagerState,
     pub seat_state: SeatState<AeroWM>,
     pub data_device_state: DataDeviceState,
+    pub idle_notifier_state: IdleNotifierState<Self>,
+    pub idle_inhibit_manager_state: IdleInhibitManagerState,
     pub popups: PopupManager,
 
     pub seat: Seat<Self>,
@@ -298,6 +289,8 @@ impl AeroWM {
         let shm_state = ShmState::new::<Self>(&dh, vec![]);
         let output_manager_state = OutputManagerState::new_with_xdg_output::<Self>(&dh);
         let data_device_state = DataDeviceState::new::<Self>(&dh);
+        let idle_notifier_state = IdleNotifierState::new(&dh, event_loop.handle());
+        let idle_inhibit_manager_state = IdleInhibitManagerState::new::<Self>(&dh);
         let popups = PopupManager::default();
 
         let mut seat_state = SeatState::new();
@@ -395,6 +388,8 @@ impl AeroWM {
             output_manager_state,
             seat_state,
             data_device_state,
+            idle_notifier_state,
+            idle_inhibit_manager_state,
             popups,
             seat,
             event_tx: None,

@@ -17,6 +17,7 @@ AeroWM organises windows in a tree structure. You can work in a focused **tiling
 - **Borders with corner rounding** - customisable focused/unfocused border colours and rounded corners
 - **Hover to focus** - optional focus-follows-mouse
 - **Scratchpad** - floating windows that live outside the tree, toggled in and out of view
+- **Idle notify** - ext-idle-notify and zwp-idle-inhibit protocol support
 - **Background** - solid colour, image, or custom GLSL shader
 - **XWayland support** - run X11 applications alongside native Wayland clients
 - **Areas** - define named rectangular regions on the canvas and jump to them instantly
@@ -153,7 +154,7 @@ Modifiers: `Ctrl`, `Alt`, `Shift`, `Super`. Mouse buttons: `left`, `right`, `mid
 - ~~**IPC** - full external control protocol over the Unix socket~~
 - **Screenshot/screencopy** - wlr-screencopy protocol support
 - **Clipboard manager support** - wlr-data-control protocol
-- **Idle/lock screen** - ext-idle-notify and ext-session-lock support
+- ~~**Idle/lock screen** - ext-idle-notify and ext-session-lock support~~ (idle notify + inhibit done; session lock pending)
 - ~~**Config hot-reload** - reload the Lua config without restarting~~
 - **Multi-language input** - IME support for non-Latin scripts
 
