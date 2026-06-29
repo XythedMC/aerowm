@@ -16,9 +16,14 @@ impl AeroWM {
     ) -> ResizeEdge {
         if self.focused_window_id.is_none() { return ResizeEdge::None }
         if cw.id != self.focused_window_id.unwrap() { return ResizeEdge::None }
+
         let (viewport_x, viewport_y, zoom) = self.current_viewport();
-        let wx = ((cw.canvas_x - viewport_x) * zoom) as i32;
-        let wy = ((cw.canvas_y - viewport_y) * zoom) as i32;
+        let output_pos = self.output_under_cursor()
+            .and_then(|o| self.space.output_geometry(o))
+            .map(|g| g.loc).unwrap_or_default();
+
+        let wx = ((cw.canvas_x - viewport_x) * zoom) as i32 + output_pos.x;
+        let wy = ((cw.canvas_y - viewport_y) * zoom) as i32 + output_pos.y;
         let ww = (cw.base_width as f64 * zoom) as i32;
         let wh = (cw.base_height as f64 * zoom) as i32;
         
@@ -48,8 +53,11 @@ impl AeroWM {
         for window in self.windows.iter().rev() {
             if window.id != self.focused_window_id.unwrap() {
                 let (vx, vy, zoom) = self.current_viewport();
-                let wx = ((window.canvas_x - vx) * zoom) as i32;
-                let wy = ((window.canvas_y - vy) * zoom) as i32;
+                let output_pos = self.output_under_cursor()
+                    .and_then(|o| self.space.output_geometry(o))
+                    .map(|g| g.loc).unwrap_or_default();
+                let wx = ((window.canvas_x - vx) * zoom) as i32 + output_pos.x;
+                let wy = ((window.canvas_y - vy) * zoom) as i32 + output_pos.y;
                 let ww = (window.base_width as f64 * zoom) as i32;
                 let wh = (window.base_height as f64 * zoom) as i32;
                 if px >= wx && px < wx + ww && py >= wy && py < wy + wh {
@@ -60,8 +68,11 @@ impl AeroWM {
             match self.window_edge_at(window, px, py) {
                 ResizeEdge::None => {
                     let (vx, vy, zoom) = self.current_viewport();
-                    let wx = ((window.canvas_x - vx) * zoom) as i32;
-                    let wy = ((window.canvas_y - vy) * zoom) as i32;
+                    let output_pos = self.output_under_cursor()
+                        .and_then(|o| self.space.output_geometry(o))
+                        .map(|g| g.loc).unwrap_or_default();
+                    let wx = ((window.canvas_x - vx) * zoom) as i32 + output_pos.x;
+                    let wy = ((window.canvas_y - vy) * zoom) as i32 + output_pos.y;
                     let ww = (window.base_width as f64 * zoom) as i32;
                     let wh = (window.base_height as f64 * zoom) as i32;
                     if px >= wx && px < wx + ww && py >= wy && py < wy + wh {
@@ -263,10 +274,13 @@ impl AeroWM {
                     self.cursor_position.y as i32, 
                 );
 
+                let cursor_output_name = self.output_under_cursor().map(|o| o.name());
+
                 let Some(window) = self.windows.iter().find(|cw| {
                     (!cw.is_scratchpad || cw.scratchpad_visible) &&
                     (cw.canvas_x..(cw.canvas_x + cw.base_width as f64)).contains(&canvas_cx) &&
-                    (cw.canvas_y..(cw.canvas_y + cw.base_height as f64)).contains(&canvas_cy)
+                    (cw.canvas_y..(cw.canvas_y + cw.base_height as f64)).contains(&canvas_cy) &&
+                    &cw.output_name == &cursor_output_name
                 }) else {
                     // No canvas window - fall back to Bottom/Background shells or nothing.
                     let result = self.layer_surface_under(self.cursor_position, &[Layer::Bottom, Layer::Background]);
@@ -395,6 +409,7 @@ impl AeroWM {
 
                 let (viewport_x, viewport_y, zoom) = self.current_viewport();
                 let (cx, cy) = self.cursor_to_canvas();
+                let cursor_output_name = self.output_under_cursor().map(|o| o.name());
 
                 let mods = keyboard.modifier_state();
                 let main_mod = match self.main_modifier {
@@ -408,7 +423,7 @@ impl AeroWM {
                 let button = event.button_code();
                 let button_state = event.state();
 
-                if button_state == ButtonState::Pressed {
+                if button_state == ButtonState::Pressed && self.modifier_action_armed {
                     for (keybind, action) in &self.config.keybinds {
                         if let Trigger::Button(mouse_btn) = &keybind.trigger {
                             if button == *mouse_btn as u32 && self.mods_match(&keybind.mods, &mods) {
@@ -418,6 +433,7 @@ impl AeroWM {
                             }
                         }
                     }
+                    self.modifier_combo_used = true;
                 }
 
                 const BTN_MIDDLE: u32 = 0x112;
@@ -452,6 +468,7 @@ impl AeroWM {
                     && button == BTN_LEFT && main_mod && under.is_some()
                 {
                     if let Some(window) = self.windows.iter().find(|cw| {
+                        cw.output_name == cursor_output_name &&
                         (cw.canvas_x..(cw.canvas_x + cw.base_width as f64)).contains(&cx) &&
                         (cw.canvas_y..(cw.canvas_y + cw.base_height as f64)).contains(&cy)
                     }) {
@@ -535,10 +552,11 @@ impl AeroWM {
                     && button == BTN_RIGHT && !main_mod
                 {
                     let hit = self.windows.iter().any(|cw| {
+                        cw.output_name == cursor_output_name &&
                         (!cw.is_scratchpad || cw.scratchpad_visible) &&
                         (cw.canvas_x..(cw.canvas_x + cw.base_width as f64)).contains(&cx) &&
                         (cw.canvas_y..(cw.canvas_y + cw.base_height as f64)).contains(&cy)
-                    }) || self.layer_surface_under(self.cursor_position, &[Layer::Overlay, Layer::Top, Layer::Background, Layer::Bottom]).is_some();
+                    }) || self.layer_surface_under(self.cursor_position, &[Layer::Overlay, Layer::Top]).is_some();
                     if !hit {
                         let (output_name, local_sx, local_sy) = self
                             .output_under_cursor()
@@ -699,6 +717,7 @@ impl AeroWM {
                     }
 
                     let hit = self.windows.iter().find(|cw| {
+                        cw.output_name == cursor_output_name &&
                         (!cw.is_scratchpad || cw.scratchpad_visible) &&
                         (cw.canvas_x..(cw.canvas_x + cw.base_width as f64)).contains(&cx) &&
                         (cw.canvas_y..(cw.canvas_y + cw.base_height as f64)).contains(&cy)

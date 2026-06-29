@@ -1088,11 +1088,11 @@ impl AeroWM {
                         self.current_cursor = String::from(icon.name());
                     }
                 }
-
-                let output_position = self.space.output_geometry(output.unwrap()).unwrap().loc;
+                let Some(current_output) = output.cloned() else { return; };
+                let output_position = self.space.output_geometry(&current_output).unwrap().loc;
                 let cursor_pos = self.cursor_position - Point::new(output_position.x as f64, output_position.y as f64);
 
-                let vs = self.per_output_state.get(output.unwrap()).unwrap();
+                let vs = self.per_output_state.get(&current_output).unwrap();
 
                 let elements = build_render_elements(
                     &output_name,
@@ -1188,28 +1188,28 @@ impl AeroWM {
 
                 self.space.elements().for_each(|window| {
                     window.send_frame(
-                        &self.space.outputs().next().unwrap(),
+                        &current_output,
                         self.start_time.elapsed(),
                         Some(Duration::ZERO),
-                        |_, _| Some(self.space.outputs().next().unwrap().clone()),
+                        |_, _| Some(current_output.clone()),
                     )
                 });
 
                 // Send frames to layer surfaces and refresh the layer map.
                 {
-                    let layer_map = layer_map_for_output(&self.space.outputs().next().unwrap());
+                    let layer_map = layer_map_for_output(&current_output);
                     for layer in layer_map.layers() {
                         layer.send_frame(
-                            &self.space.outputs().next().unwrap(),
+                            &current_output,
                             self.start_time.elapsed(),
                             Some(Duration::ZERO),
-                            |_, _| Some(self.space.outputs().next().unwrap().clone()),
+                            |_, _| Some(current_output.clone()),
                         );
                     }
                 }
 
                 self.space.refresh();
-                layer_map_for_output(&self.space.outputs().next().unwrap()).cleanup();
+                layer_map_for_output(&current_output).cleanup();
                 self.popups.cleanup();
                 let _ = self.display_handle.flush_clients();
             },
@@ -1247,12 +1247,15 @@ impl AeroWM {
 
     pub fn cursor_to_canvas(&self) -> (f64, f64) {
         let (vx, vy, zoom) = self.current_viewport();
-
-        let canvas_x = self.cursor_position.x / zoom + vx;
-        let canvas_y = self.cursor_position.y / zoom + vy;
+        let output_pos = self.output_under_cursor()
+            .and_then(|o| self.space.output_geometry(o))
+            .map(|g| g.loc).unwrap_or_default();
+        let canvas_x = (self.cursor_position.x - output_pos.x as f64) / zoom + vx;
+        let canvas_y = (self.cursor_position.y - output_pos.y as f64) / zoom + vy;
 
         (canvas_x, canvas_y)
     }
+    
     // -- Launch Apps --------------------------------
     pub fn launch_app(&mut self, name: &str) {
         let (x, y) = (self.cursor_position.x, self.cursor_position.y);
