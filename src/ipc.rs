@@ -21,13 +21,25 @@ pub enum IpcCommand {
     #[serde(rename = "launch")]
     Launch { command: String },
     #[serde(rename = "close")]
-    Close { id: String },
+    Close { id: Option<String> },
     #[serde(rename = "get_areas")]
     GetAreas,
     #[serde(rename = "get_monitors")]
     GetMonitors,
     #[serde(rename = "move_to_next_output")]
-    MoveToNextOutput
+    MoveToNextOutput,
+    #[serde(rename = "fullscreen")]
+    Fullscreen,
+    #[serde(rename = "toggle_scratchpad")]
+    ToggleScratchpad,
+    #[serde(rename = "send_to_scratchpad")]
+    SendToScratchpad,
+    #[serde(rename = "reset_view")]
+    ResetView,
+    #[serde(rename = "focus_zoom")]
+    FocusZoom,
+    #[serde(rename = "switch_layout")]
+    SwitchLayout,
 }
 
 pub enum InternalCommand {
@@ -36,10 +48,16 @@ pub enum InternalCommand {
     Pan { dx: f64, dy: f64 },
     SetMode { mode: String },
     Launch { command: String },
-    Close { id: String },
+    Close { id: Option<String>, reply_to: oneshot::Sender<String> },
     GetAreas { reply_to: oneshot::Sender<String> },
     GetMonitors { reply_to: oneshot::Sender<String> },
     MoveToNextOutput,
+    Fullscreen,
+    ToggleScratchpad,
+    SendToScratchpad,
+    ResetView,
+    FocusZoom,
+    SwitchLayout,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -57,6 +75,10 @@ pub enum IpcEvent {
     ModeChanged { mode: String },
     #[serde(rename = "viewport_changed")]
     ViewportChanged { x: f64, y: f64 },
+    #[serde(rename = "canvas_right_click")]
+    CanvasRightClicked { x: f64, y: f64, sx: f64, sy: f64, output: String },
+    #[serde(rename = "shell_toggle")]
+    ShellToggle { sx: f64, sy: f64, output: String },
 }
 
 #[derive(Serialize, Debug, Clone)]
@@ -163,7 +185,15 @@ pub async fn run_ipc_server(
                                         IpcCommand::Pan { dx, dy } => InternalCommand::Pan { dx, dy },
                                         IpcCommand::SetMode { mode } => InternalCommand::SetMode { mode },
                                         IpcCommand::Launch { command } => InternalCommand::Launch { command },
-                                        IpcCommand::Close { id } => InternalCommand::Close { id },
+                                        IpcCommand::Close { id } => {
+                                            let (tx, rx) = oneshot::channel();
+                                            let _ = cmd_tx.send(InternalCommand::Close {id, reply_to: tx});
+                                            if let Ok(resp) = rx.await {
+                                                let _ = write_half.write_all(format!("{}\n", resp).as_bytes()).await;
+                                            }
+                                            line.clear();
+                                            continue;
+                                        },
                                         IpcCommand::GetAreas => {
                                             let (tx, rx) = oneshot::channel();
                                             let _ = cmd_tx.send(InternalCommand::GetAreas { reply_to: tx });
@@ -182,7 +212,13 @@ pub async fn run_ipc_server(
                                             line.clear();
                                             continue;                                            
                                         }
-                                        IpcCommand::MoveToNextOutput => InternalCommand::MoveToNextOutput
+                                        IpcCommand::MoveToNextOutput => InternalCommand::MoveToNextOutput,
+                                        IpcCommand::Fullscreen => InternalCommand::Fullscreen,
+                                        IpcCommand::ToggleScratchpad => InternalCommand::ToggleScratchpad,
+                                        IpcCommand::SendToScratchpad => InternalCommand::SendToScratchpad,
+                                        IpcCommand::ResetView => InternalCommand::ResetView,
+                                        IpcCommand::FocusZoom => InternalCommand::FocusZoom,
+                                        IpcCommand::SwitchLayout => InternalCommand::SwitchLayout,
                                     };
                                     let _ = cmd_tx.send(internal_cmd);
                                 }

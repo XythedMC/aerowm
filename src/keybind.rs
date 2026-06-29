@@ -48,6 +48,7 @@ pub enum Action {
     SendToScratchpad,
     ToggleScratchpad,
     SwitchLayout,
+    ToggleShell,
 }
 
 pub fn parse_keybind(s: &str) -> Result<ParsedKeybind, Error> {
@@ -142,6 +143,7 @@ pub fn parse_action(action: &str, args: Option<String>) -> Result<Action, Error>
         "send_to_scratchpad" => Ok(Action::SendToScratchpad),
         "toggle_scratchpad" => Ok(Action::ToggleScratchpad),
         "switch_layout" => Ok(Action::SwitchLayout),
+        "toggle_shell" => Ok(Action::ToggleShell),
         _ => Err(anyhow!("action type not supported"))
     }
 }
@@ -149,7 +151,7 @@ pub fn parse_action(action: &str, args: Option<String>) -> Result<Action, Error>
 impl AeroWM {
     pub fn dispatch_action(&mut self, action: &Action) {
         match action {
-            Action::Close => self.close(),
+            Action::Close => self.close_window(None),
             Action::Exec(name) => {
                 let cmd = self.config.default_apps.get(name.as_str()).cloned().unwrap_or_else(|| name.clone());
                 self.launch_app(&cmd);
@@ -181,6 +183,17 @@ impl AeroWM {
             Action::SendToScratchpad => self.send_to_scratchpad(),
             Action::ToggleScratchpad => self.toggle_scratchpad(),
             Action::SwitchLayout => self.switch_layout(),
+            Action::ToggleShell => {
+                let (output_name, sx, sy) = self.output_under_cursor()
+                    .and_then(|o| self.space.output_geometry(o).map(|g| (o.name(), g.loc)))
+                    .map(|(name, loc)| {
+                        (name,
+                         self.cursor_position.x - loc.x as f64,
+                         self.cursor_position.y - loc.y as f64)
+                    })
+                    .unwrap_or_else(|| (String::new(), self.cursor_position.x, self.cursor_position.y));
+                self.emit_event(crate::ipc::IpcEvent::ShellToggle { sx, sy, output: output_name });
+            }
         }
     }
 
@@ -207,13 +220,19 @@ impl AeroWM {
         }
     }
 
-    fn close(&self) {
-        if self.focused_window_id.is_none() { return; }
-        self.windows
-            .iter()
-            .find(|cw| cw.id == self.focused_window_id.unwrap())
-            .and_then(|cw| cw.window.toplevel()
-            .map(|t| t.send_close()));
+    pub fn close_window(&self, id: Option<u32>) {
+        if let Some(target) = id.or(self.focused_window_id) {
+            self.windows
+                .iter()
+                .find(|cw| cw.id == target)
+                .map(|cw| {
+                    if let Some(t) = cw.window.toplevel() {
+                        t.send_close();
+                    } else if let Some(x) = cw.window.x11_surface() {
+                        let _ = x.close();
+                    }
+                });
+        }
     }
 
     fn remove_current_area(&mut self) {
@@ -236,18 +255,14 @@ impl AeroWM {
         if self.areas.contains_key(&n) == false { return; }
         let area = self.areas[&n];
         let (_aw, ah) = (area.size.w, area.size.h);
-        let (sw, sh) = {
-            let o = self.space.outputs().next().unwrap();
-            let g = self.space.output_geometry(o).unwrap(); 
-            (g.size.w, g.size.h)
-        };
+        let (sw, sh) = self.output_size();
         let zoom_target = sh as f64 / ah;
         let cx = area.loc.x + area.size.w / 2.0;
         let cy = area.loc.y + area.size.h / 2.0;
         self.zoom_target = zoom_target;
         self.zoom_anim_start = self.zoom;
-        self.viewport_target_x = cx - (sw / 2) as f64 / zoom_target;
-        self.viewport_target_y = cy - (sh / 2) as f64 / zoom_target;
+        self.viewport_target_x = cx - (sw / 2.0) / zoom_target;
+        self.viewport_target_y = cy - (sh / 2.0) / zoom_target;
         self.begin_animation();
         self.current_area = Some(n);
     }
@@ -458,11 +473,17 @@ impl AeroWM {
     }
 
     pub fn mods_match(&self, required: &[ModifierKey], held: &ModifiersState) -> bool {
-        required.iter().all(|m| match m {
+        let all_required = required.iter().all(|m| match m {
             ModifierKey::Alt => held.alt,
             ModifierKey::Ctrl => held.ctrl,
             ModifierKey::Shift => held.shift,
             ModifierKey::Super => held.logo,
-        })
+        });
+        let no_extra = 
+            (!held.alt || held.iso_level3_shift || required.contains(&ModifierKey::Alt)) && 
+            (!held.ctrl || required.contains(&ModifierKey::Ctrl)) && 
+            (!held.shift || required.contains(&ModifierKey::Shift)) && 
+            (!held.logo || required.contains(&ModifierKey::Super));
+        all_required && no_extra
     }
 }

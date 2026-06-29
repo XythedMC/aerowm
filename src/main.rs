@@ -9,7 +9,6 @@ mod rendering;
 mod keybind;
 
 use dirs::config_dir;
-use mlua::Error;
 use notify::{RecursiveMode, Watcher};
 pub use state::AeroWM;
 
@@ -81,7 +80,7 @@ fn main() -> anyhow::Result<()>{
         .join("aerowm")
         .join("aerowm.lua");
     watcher.watch(&config_path.to_path_buf(), RecursiveMode::NonRecursive).unwrap();
-    std::mem::forget(watcher);
+    Box::leak(Box::new(watcher));
 
     event_loop.handle().insert_source(config_rx, |_event, _, state| {
         state.reload_config().expect("Failed to reload config, there is a problem with the config file");

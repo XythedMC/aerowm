@@ -30,15 +30,15 @@ use smithay::{
     }, utils::{DeviceFd, Logical, Point, Rectangle, SERIAL_COUNTER, Size, Transform}, wayland::{
         compositor::{self, CompositorClientState, CompositorState}, cursor_shape::CursorShapeManagerState, dmabuf::{DmabufState, ImportNotifier}, fractional_scale::FractionalScaleManagerState, idle_inhibit::IdleInhibitManagerState, idle_notify::IdleNotifierState, image_capture_source::{ImageCaptureSourceState, OutputCaptureSourceState}, image_copy_capture::{Frame as ScreencopyFrame, ImageCopyCaptureState, Session}, input_method::InputMethodManagerState, output::OutputManagerState, selection::{
             data_device::DataDeviceState, primary_selection::PrimarySelectionState, wlr_data_control::DataControlState
-        }, shell::{wlr_layer::WlrLayerShellState, xdg::{XdgShellState, XdgToplevelSurfaceRoleAttributes, decoration::XdgDecorationState}}, shm::{ShmState, with_buffer_contents_mut}, socket::ListeningSocketSource, text_input::TextInputManagerState, viewporter::ViewporterState, xdg_activation::XdgActivationState, xwayland_shell::XWaylandShellState
+        }, shell::{wlr_layer::{Layer, WlrLayerShellState}, xdg::{XdgShellState, XdgToplevelSurfaceRoleAttributes, decoration::XdgDecorationState}}, shm::{ShmState, with_buffer_contents_mut}, socket::ListeningSocketSource, text_input::TextInputManagerState, viewporter::ViewporterState, xdg_activation::XdgActivationState, xwayland_shell::XWaylandShellState
     }, xwayland::{X11Wm, XWayland, XWaylandEvent}
 };
 
 use tokio::sync::broadcast::Sender;
 use xcursor::{CursorTheme, parser::parse_xcursor};
 use crate::{
-    handlers::config::{AeroWMConfig, read_config}, 
-    keybind::ParsedKeybind, 
+    handlers::config::{AeroWMConfig, read_config},
+    keybind::{ParsedKeybind, Action},
     rendering::build_render_elements,
     ipc::{IpcEvent, InternalCommand, TreeWindow, TreeViewport, TreeResponse, AreasResponse, MonitorsResponse, MonitorInfo},
 };
@@ -97,7 +97,7 @@ pub struct BackendData {
     pub udev_token: RegistrationToken,
 }
 
-#[derive(Clone, Default)]
+#[derive(Clone)]
 pub struct ViewportState {
     pub viewport_x: f64,
     pub viewport_y: f64,
@@ -106,6 +106,17 @@ pub struct ViewportState {
     pub tiling_visible_ids: Vec<u32>,
 }
 
+impl Default for ViewportState {
+    fn default() -> Self {
+        Self {
+            viewport_x: 0.0,
+            viewport_y: 0.0,
+            zoom: 1.0,
+            view_mode: ViewMode::default(),
+            tiling_visible_ids: Vec::new(),
+        }
+    }
+}
 /// A window with its position on the infinite canvas and its place in the window tree.
 #[derive(Clone)]
 pub struct CanvasWindow {
@@ -224,6 +235,12 @@ pub struct AeroWM {
     // Dragging
     pub active_drag: bool,
     pub dragged_window: Option<(u32, Point<f64, Logical>)>,
+
+    // Modifier-only keybind: armed on first press, fired on release only if no combo was used.
+    // modifier_action_armed: true from first modifier press until release.
+    // modifier_combo_used: set true when any non-modifier key is pressed while armed (disqualifies firing).
+    pub modifier_action_armed: bool,
+    pub modifier_combo_used: bool,
 
     pub layer_surfaces: Vec<LayerSurface>,
 
@@ -395,6 +412,8 @@ impl AeroWM {
             cursor_texture: None,
             active_drag: false,
             dragged_window: None,
+            modifier_action_armed: false,
+            modifier_combo_used: false,
             layer_surfaces,
             x11_override_redirect: Vec::new(),
             background_type,
@@ -1071,7 +1090,7 @@ impl AeroWM {
                 }
 
                 let output_position = self.space.output_geometry(output.unwrap()).unwrap().loc;
-                let cursor_pos = self.cursor_position - Point::new(output_position.x as f64, 0.0);
+                let cursor_pos = self.cursor_position - Point::new(output_position.x as f64, output_position.y as f64);
 
                 let vs = self.per_output_state.get(output.unwrap()).unwrap();
 
@@ -1079,6 +1098,7 @@ impl AeroWM {
                     &output_name,
                     &self.windows,
                     &self.x11_override_redirect,
+                    self.focused_window_id,
                     &self.space,
                     vs.view_mode,
                     &vs.tiling_visible_ids,
@@ -1141,9 +1161,9 @@ impl AeroWM {
                 let all = std::mem::take(&mut self.pending_screencopy_frames);
                 let (mine, rest): (Vec<(Output, ScreencopyFrame)>, Vec<(Output, ScreencopyFrame)>) = all.into_iter().partition(|(o, _)| o == output.unwrap());
                 self.pending_screencopy_frames = rest;
-
                 for (output, frame) in mine {
-                    let (width, height) = output.current_mode().unwrap().size.into();
+                    let Some(mode) = output.current_mode() else { continue; };
+                    let (width, height) = mode.size.into();
                     let mut pixels = vec![0u8; (width * height * 4) as usize];
                     let _ = renderer.with_context(|gl| unsafe {
                         gl.ReadPixels(
@@ -1316,16 +1336,33 @@ impl AeroWM {
     }
 
     pub fn sync_window_positions(&mut self) {
-        let (vx, vy, zoom) = self.current_viewport();
+        // Collect per-output geometry and viewport so we can translate each
+        // window's canvas position into global screen coordinates.
+        let output_info: Vec<(String, Point<i32, Logical>, f64, f64, f64)> = self
+            .space
+            .outputs()
+            .filter_map(|o| {
+                let loc = self.space.output_geometry(o)?.loc;
+                let vs  = self.per_output_state.get(o)?;
+                Some((o.name(), loc, vs.viewport_x, vs.viewport_y, vs.zoom))
+            })
+            .collect();
 
         let updates: Vec<(Window, i32, i32)> = self
             .windows
             .iter()
             .filter(|cw| !cw.is_scratchpad || cw.scratchpad_visible)
-            .map(|cw| {
-                let sx = ((cw.canvas_x - vx) * zoom) as i32;
-                let sy = ((cw.canvas_y - vy) * zoom) as i32;
-                (cw.window.clone(), sx, sy)
+            .filter_map(|cw| {
+                // Find the output this window belongs to; fall back to the first
+                // output if the name isn't set yet.
+                let (_, loc, vx, vy, zoom) = output_info
+                    .iter()
+                    .find(|(name, ..)| Some(name) == cw.output_name.as_ref())
+                    .or_else(|| output_info.first())?;
+
+                let sx = loc.x + ((cw.canvas_x - vx) * zoom) as i32;
+                let sy = loc.y + ((cw.canvas_y - vy) * zoom) as i32;
+                Some((cw.window.clone(), sx, sy))
             })
             .collect();
 
@@ -1465,32 +1502,60 @@ impl AeroWM {
         self.anim_start = Some(Instant::now());
     }
 
+    // Hit-tests only layer shells on the given layers (e.g. [Overlay, Top]),
+    // iterating from topmost to bottommost within each layer group.
+    pub fn layer_surface_under(
+        &self,
+        pos: Point<f64, Logical>,
+        kinds: &[Layer],
+    ) -> Option<(WlSurface, Point<f64, Logical>)> {
+        let output = self.space.outputs().find(|o| {
+            self.space.output_geometry(o)
+                .map(|g| g.to_f64().contains(pos))
+                .unwrap_or(false)
+        })?;
+        let output_geo = self.space.output_geometry(output).unwrap_or_default();
+
+        let layer_map = layer_map_for_output(output);
+        for &kind in kinds {
+            for layer in layer_map.layers_on(kind).rev() {
+                let window_geo = layer_map.layer_geometry(layer).unwrap_or_default();
+                let local = Point::<f64, Logical>::new(
+                    pos.x - output_geo.loc.x as f64 - window_geo.loc.x as f64,
+                    pos.y - output_geo.loc.y as f64 - window_geo.loc.y as f64,
+                );
+                if let Some((surf, p)) = layer.surface_under(local, WindowSurfaceType::ALL) {
+                    return Some((surf, p.to_f64() + window_geo.loc.to_f64() + output_geo.loc.to_f64()));
+                }
+                if local.x >= 0.0 && local.y >= 0.0
+                    && local.x < window_geo.size.w as f64 && local.y < window_geo.size.h as f64
+                {
+                    return Some((layer.wl_surface().clone(), window_geo.loc.to_f64() + output_geo.loc.to_f64()));
+                }
+            }
+        }
+        None
+    }
+
+    // Stacking order (bottom -> top): Background, Bottom, windows, Top, Overlay.
+    // We check in that order so higher layers always win the hit test.
     pub fn surface_under(
         &self,
         pos: Point<f64, Logical>,
     ) -> Option<(WlSurface, Point<f64, Logical>)> {
-        let element = self.space.element_under(pos).and_then(|(window, location)| {
+        if let Some(hit) = self.layer_surface_under(pos, &[Layer::Overlay, Layer::Top]) {
+            return Some(hit);
+        }
+
+        if let Some(hit) = self.space.element_under(pos).and_then(|(window, location)| {
             window
                 .surface_under(pos - location.to_f64(), WindowSurfaceType::ALL)
                 .map(|(s, p)| (s, (p + location).to_f64()))
-        });
-        if element.is_none() {
-            let layer_map = layer_map_for_output(self.space.outputs().next().unwrap());
-            for layer in layer_map.layers() {
-                let geo = layer_map.layer_geometry(layer).unwrap_or_default();
+        }) {
+            return Some(hit);
+        }
 
-                let local: Point<f64, Logical> = Point::new(
-                    pos.x - geo.loc.to_f64().x, 
-                    pos.y - geo.loc.to_f64().y
-                );
-                if let Some((surf, p)) = layer.surface_under(local, WindowSurfaceType::ALL) {
-                    return Some((surf, p.to_f64() + geo.loc.to_f64()));
-                } else if local.x >= 0.0 && local.y >= 0.0 {
-                    return Some((layer.wl_surface().clone(), geo.loc.to_f64()))
-                }
-            }
-        } 
-        element
+        self.layer_surface_under(pos, &[Layer::Bottom, Layer::Background])
     }
 
     // - IPC -------------------------------─
@@ -1558,39 +1623,64 @@ impl AeroWM {
                 });
             }
             InternalCommand::SetMode { mode } => {
-                let new_mode = if mode == "tiling" {
-                    ViewMode::Tiling
-                } else if mode == "tree" {
-                    ViewMode::TreeView
-                } else {
-                    return;
+                let new_mode = match mode.as_str() {
+                    "tiling" => ViewMode::Tiling,
+                    "tree"   => ViewMode::TreeView,
+                    _        => return,
                 };
-                if self.current_view_mode() != new_mode {
-                    if let Some(output) = self.output_under_cursor().cloned() {
-                        let Some(vs) = self.per_output_state.get_mut(&output) else { return; };
-                        vs.view_mode = new_mode;
-                        if new_mode == ViewMode::Tiling {
-                            self.tiling_root_id = self.focused_window_id;
-                            self.zoom = 1.0;
-                            output.change_current_state(None, None, Some(smithay::output::Scale::Fractional(self.zoom)), None);
+                if new_mode == ViewMode::Tiling {
+                    let output_modes: HashMap<String, ViewMode> = self.space.outputs()
+                        .filter_map(|o| self.per_output_state.get(o).map(|vs| (o.name(), vs.view_mode)))
+                        .collect();
+                    for cw in &mut self.windows {
+                        if cw.output_name.as_deref().and_then(|n| output_modes.get(n)) == Some(&ViewMode::TreeView) {
+                            cw.tree_x = Some(cw.canvas_x);
+                            cw.tree_y = Some(cw.canvas_y);
                         }
-                        self.apply_layout();
-                        self.emit_event(IpcEvent::ModeChanged { mode: mode.clone() });
                     }
+                }
+                let outputs: Vec<Output> = self.space.outputs().cloned().collect();
+                let mut changed = false;
+                for output in &outputs {
+                    if let Some(vs) = self.per_output_state.get_mut(output) {
+                        if vs.view_mode != new_mode {
+                            vs.view_mode = new_mode;
+                            changed = true;
+                            if new_mode == ViewMode::Tiling {
+                                self.zoom = 1.0;
+                                vs.zoom = 1.0;
+                                output.change_current_state(None, None, Some(smithay::output::Scale::Fractional(self.zoom)), None);
+                            }
+                        }
+                    }
+                }
+                if changed {
+                    if new_mode == ViewMode::Tiling {
+                        self.tiling_root_id = self.focused_window_id;
+                    }
+                    self.apply_layout();
+                    self.emit_event(IpcEvent::ModeChanged { mode });
                 }
             }
             InternalCommand::Launch { command } => self.launch_app(&command),
-            InternalCommand::Close { id } => {
-                if let Ok(id) = id.parse::<u32>() {
-                    if self.windows.iter().any(|cw| cw.id == id) == false {
-                        return;
+            InternalCommand::Close { id, reply_to } => {
+                let target_id = match id {
+                    Some(s) => match s.parse::<u32>() {
+                        Ok(id) => Some(id),
+                        Err(_) => { let _ = reply_to.send("{\"error\":\"invalid id\"}".into()); return; }
+                    },
+                    None => self.focused_window_id,
+                };
+                match target_id {
+                    None => { let _ = reply_to.send("{\"error\":\"no focused window\"}".into()); }
+                    Some(id) if !self.windows.iter().any(|cw| cw.id == id) => {
+                        let _ = reply_to.send("{\"error\":\"window not found\"}".into());
                     }
-                    self.windows
-                        .iter()
-                        .find(|cw| cw.id == id)
-                        .and_then(|cw| cw.window.toplevel()
-                        .map(|t| t.send_close()));
-                } else { return; }
+                    Some(_) => {
+                        self.close_window(target_id);
+                        let _ = reply_to.send("{\"ok\":true}".into());
+                    }
+                }
             }
             InternalCommand::GetAreas { reply_to } => {
                 let resp = AreasResponse {
@@ -1605,6 +1695,7 @@ impl AeroWM {
                 let outputs = self.space.outputs();
                 let mut monitors: Vec<MonitorInfo> = Vec::new();
                 for output in outputs {
+                    let Some(mode) = output.current_mode() else { continue; };
                     let properties = output.physical_properties();
                     let size = self.space.output_geometry(output).unwrap().size;
                     let position = self.space.output_geometry(output).unwrap().loc;
@@ -1617,7 +1708,7 @@ impl AeroWM {
                         y: position.y,
                         width: size.w,
                         height: size.h,
-                        refresh_rate: output.current_mode().unwrap().refresh,
+                        refresh_rate: mode.refresh,
                         scale: output.current_scale().fractional_scale(),
                         focused: self.output_under_cursor().map_or(false, |o| o == output),
                     };
@@ -1626,12 +1717,17 @@ impl AeroWM {
                 let resp = MonitorsResponse { monitors };
                 let _ = reply_to.send(serde_json::to_string(&resp).unwrap());
             }
-            InternalCommand::MoveToNextOutput => self.move_to_next_output()
+            InternalCommand::MoveToNextOutput => self.move_to_next_output(),
+            InternalCommand::Fullscreen => self.dispatch_action(&Action::Fullscreen),
+            InternalCommand::ToggleScratchpad => self.dispatch_action(&Action::ToggleScratchpad),
+            InternalCommand::SendToScratchpad => self.dispatch_action(&Action::SendToScratchpad),
+            InternalCommand::ResetView => self.dispatch_action(&Action::ResetView),
+            InternalCommand::FocusZoom => self.dispatch_action(&Action::FocusZoom),
+            InternalCommand::SwitchLayout => self.dispatch_action(&Action::SwitchLayout),
         }
     }
 
-    // - Debug output ---------------------------─
-
+    // - Debug output ----------------------------
     pub fn print_tree(&self) {
         eprintln!("=== Window Tree ===");
         let roots: Vec<u32> = self

@@ -152,15 +152,17 @@ pub fn line_element(prog: &GlesPixelProgram, start: (f32, f32), end: (f32, f32))
     )
 }
 
-pub fn connector_elements(windows: &[CanvasWindow], zoom: f64, viewport_x: f64, viewport_y: f64, prog: &GlesPixelProgram) -> Vec<PixelShaderElement> {
+pub fn connector_elements(output_name: &Option<String>, windows: &[CanvasWindow], zoom: f64, viewport_x: f64, viewport_y: f64, prog: &GlesPixelProgram) -> Vec<PixelShaderElement> {
     windows
         .iter()
         .filter_map(|cw| {
             if cw.is_fullscreen { return None; }
             if cw.is_scratchpad { return None; }
-            let pid    = cw.parent_id?;
+            if &cw.output_name != output_name { return None; }
+            let pid = cw.parent_id?;
             let parent = windows.iter().find(|p| p.id == pid)?;
-            
+
+            if &parent.output_name != output_name { return None; }
             if parent.is_scratchpad { return None; }
             
             let z   = zoom as f32;
@@ -181,7 +183,7 @@ pub fn connector_elements(windows: &[CanvasWindow], zoom: f64, viewport_x: f64, 
 
 pub fn focus_border_elements(
     focused_window_id: Option<u32>,
-    config: AeroWMConfig,
+    config: &AeroWMConfig,
     zoom: f64,
     prog: &GlesPixelProgram, 
     cw: &CanvasWindow, 
@@ -263,6 +265,7 @@ pub fn build_render_elements(
     output_name: &Option<String>,
     windows: &[CanvasWindow],
     or_windows: &[Window],
+    focused_window_id: Option<u32>,
     space: &Space<Window>,
     view_mode: ViewMode,
     tiling_visible_ids: &[u32],
@@ -286,7 +289,11 @@ pub fn build_render_elements(
 ) ->Vec<AeroWMElement> {
     // Assemble overlay elements for this frame.
     let mut overlays: Vec<AeroWMElement> = Vec::new();
-    let output = space.outputs().next().unwrap().clone();
+    let output = output_name
+        .as_deref()
+        .and_then(|name| space.outputs().find(|o| o.name() == name))
+        .or_else(|| space.outputs().next())
+        .unwrap().clone();
 
     if !cursor_texture.is_none() {
         overlays.push(AeroWMElement::Texture(draw_cursor(cursor_position, cursor_texture.clone().expect("cursor image undefined"), renderer, scale, config)));
@@ -330,7 +337,7 @@ pub fn build_render_elements(
         };
         
         if let Some(prog) = &border_prog {
-            overlays.push(AeroWMElement::Shader(focus_border_elements(Some(window.id), config.clone(), zoom, prog, window, geo)));
+            overlays.push(AeroWMElement::Shader(focus_border_elements(focused_window_id, &config, zoom, prog, window, geo)));
         }
         overlays.extend(
             window.window.render_elements::<WaylandSurfaceRenderElement<GlesRenderer>>(
@@ -391,7 +398,7 @@ pub fn build_render_elements(
     }
     if view_mode == ViewMode::TreeView {
         if let Some(prog) = &line_prog {
-            overlays.extend(connector_elements(windows, zoom, viewport_x, viewport_y, prog).into_iter().map(AeroWMElement::Shader));
+            overlays.extend(connector_elements(output_name, windows, zoom, viewport_x, viewport_y, prog).into_iter().map(AeroWMElement::Shader));
         }
     }
 
@@ -399,8 +406,7 @@ pub fn build_render_elements(
         "image" => {
             if let Some(tex) = background_texture {
                 let (sw, sh) = {
-                    let o = space.outputs().next().unwrap();
-                    let g = space.output_geometry(o).unwrap(); 
+                    let g = space.output_geometry(&output).unwrap_or_default(); 
                     (g.size.w, g.size.h)
                 };
 
@@ -443,8 +449,7 @@ pub fn build_render_elements(
         "shader" => {
             if let Some(prog) = background_shader_prog {
                 let (sw, sh) = {
-                    let o = space.outputs().next().unwrap();
-                    let g = space.output_geometry(o).unwrap();
+                    let g = space.output_geometry(&output).unwrap_or_default();
                     (g.size.w, g.size.h)
                 };
                 overlays.push(AeroWMElement::Shader(PixelShaderElement::new(

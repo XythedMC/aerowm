@@ -120,6 +120,7 @@ pub fn init_winit(
                             &output_name,
                             &state.windows,
                             &state.x11_override_redirect,
+                            state.focused_window_id,
                             &state.space,
                             vs.view_mode,
                             &vs.tiling_visible_ids,

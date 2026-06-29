@@ -1,13 +1,13 @@
 use smithay::{
     backend::input::{
         AbsolutePositionEvent, Axis, AxisSource, ButtonState, Event, GesturePinchUpdateEvent, GestureSwipeUpdateEvent, InputBackend, InputEvent, KeyState, KeyboardKeyEvent, PointerAxisEvent, PointerButtonEvent, PointerMotionEvent
-    }, desktop::{WindowSurfaceType, layer_map_for_output}, input::{
+    }, desktop::WindowSurfaceType, input::{
         keyboard::{FilterResult, Keysym},
         pointer::{AxisFrame, ButtonEvent, CursorIcon, CursorImageStatus, Focus, GrabStartData as PointerGrabStartData, MotionEvent},
-    }, reexports::{wayland_protocols::xdg::shell::server::xdg_toplevel::ResizeEdge, wayland_server::protocol::wl_surface::WlSurface}, utils::{Logical, Point, Rectangle, SERIAL_COUNTER}, wayland::{input_method::InputMethodSeat, shell::wlr_layer::KeyboardInteractivity},
+    }, reexports::{wayland_protocols::xdg::shell::server::xdg_toplevel::ResizeEdge, wayland_server::protocol::wl_surface::WlSurface}, utils::{Logical, Point, Rectangle, SERIAL_COUNTER}, wayland::{compositor::get_parent, input_method::InputMethodSeat, shell::wlr_layer::{KeyboardInteractivity, Layer}},
 };
 
-use crate::{AeroWM, grabs::{PanCanvasGrab, ResizeSurfaceGrab}, keybind::{Action, Trigger}, state::{CanvasWindow, ModifierKey, ViewMode}};
+use crate::{AeroWM, grabs::{PanCanvasGrab, ResizeSurfaceGrab}, ipc::IpcEvent, keybind::{Action, Trigger}, state::{CanvasWindow, ModifierKey, ViewMode}};
 impl AeroWM {
     fn window_edge_at(
         &self,
@@ -46,10 +46,19 @@ impl AeroWM {
     ) -> CursorImageStatus {
         if self.focused_window_id.is_none() { return CursorImageStatus::default_named() }
         for window in self.windows.iter().rev() {
-            if window.id != self.focused_window_id.unwrap() { return CursorImageStatus::default_named() }
+            if window.id != self.focused_window_id.unwrap() {
+                let (vx, vy, zoom) = self.current_viewport();
+                let wx = ((window.canvas_x - vx) * zoom) as i32;
+                let wy = ((window.canvas_y - vy) * zoom) as i32;
+                let ww = (window.base_width as f64 * zoom) as i32;
+                let wh = (window.base_height as f64 * zoom) as i32;
+                if px >= wx && px < wx + ww && py >= wy && py < wy + wh {
+                    return CursorImageStatus::default_named();
+                }
+                continue;
+            }
             match self.window_edge_at(window, px, py) {
                 ResizeEdge::None => {
-                    // If the mouse is inside this window's body, we should stop checking background windows
                     let (vx, vy, zoom) = self.current_viewport();
                     let wx = ((window.canvas_x - vx) * zoom) as i32;
                     let wy = ((window.canvas_y - vy) * zoom) as i32;
@@ -100,34 +109,62 @@ impl AeroWM {
                         time,
                         |data, modifiers, handle| {
                             let sym = handle.modified_sym();
+                            let raw_syms = handle.raw_syms();
+                            let is_mod = data.is_modifier_keysym(sym);
 
                             if key_state == KeyState::Pressed {
                                 for (keybind, action) in &data.config.keybinds {
                                     if let Trigger::Key(keysym) = keybind.trigger {
-                                        if keysym == sym && data.mods_match(&keybind.mods, modifiers) {
+                                        if raw_syms.contains(&keysym) && data.mods_match(&keybind.mods, modifiers) {
                                             if let Action::ShowAreas = action {
                                                 data.show_areas = true;
+                                                data.modifier_combo_used = true;
                                                 return FilterResult::Intercept(());
                                             }
                                             pending_action = Some(action.clone());
+                                            data.modifier_combo_used = true;
                                             return FilterResult::Intercept(());
                                         }
                                     }
                                     if let Trigger::Modifiers = keybind.trigger {
-                                        if data.is_modifier_keysym(sym) && data.mods_match(&keybind.mods, modifiers) {
-                                            pending_action = Some(action.clone());
+                                        if is_mod && data.mods_match(&keybind.mods, modifiers) {
+                                            data.modifier_action_armed = true;
                                             return FilterResult::Intercept(());
                                         }
                                     }
                                 }
+                                if !is_mod {
+                                    data.modifier_combo_used = true;
+                                }
                             } else {
                                 for (keybind, action) in &data.config.keybinds {
                                     if let (Trigger::Key(keysym), Action::ShowAreas) = (&keybind.trigger, action) {
-                                        if *keysym == sym {
+                                        if raw_syms.contains(keysym) {
                                             data.show_areas = false;
                                             break;
                                         }
                                     }
+                                }
+                                if is_mod && data.modifier_action_armed && !data.modifier_combo_used {
+                                    let mut held = *modifiers;
+                                    if matches!(sym, Keysym::Super_L | Keysym::Super_R) { held.logo  = true; }
+                                    if matches!(sym, Keysym::Alt_L   | Keysym::Alt_R  ) { held.alt   = true; }
+                                    if matches!(sym, Keysym::Shift_L | Keysym::Shift_R) { held.shift = true; }
+                                    if matches!(sym, Keysym::Control_L | Keysym::Control_R) { held.ctrl = true; }
+                                    for (keybind, action) in &data.config.keybinds {
+                                        if let Trigger::Modifiers = keybind.trigger {
+                                            if data.mods_match(&keybind.mods, &held) {
+                                                pending_action = Some(action.clone());
+                                                data.modifier_action_armed = false;
+                                                data.modifier_combo_used   = false;
+                                                return FilterResult::Intercept(());
+                                            }
+                                        }
+                                    }
+                                }
+                                if is_mod {
+                                    data.modifier_action_armed = false;
+                                    data.modifier_combo_used = false;
                                 }
                             }
 
@@ -182,8 +219,8 @@ impl AeroWM {
                     let (id, _) = self.dragged_window.unwrap();
                     self.windows.iter_mut().find(|cw| cw.id == id)
                         .map(|cw| {
-                            cw.canvas_x += event.delta_x() / zoom;
-                            cw.canvas_y += event.delta_y() / zoom;
+                            cw.canvas_x += delta.x * speed / zoom;
+                            cw.canvas_y += delta.y * speed / zoom;
                             cw.target_x = cw.canvas_x;
                             cw.target_y = cw.canvas_y;
                             cw.anim_start_x = cw.canvas_x;
@@ -208,60 +245,35 @@ impl AeroWM {
                     return;
                 }
 
-                self.cursor_icon = self.cursor_icon_for(
-                    pointer.current_location().x as i32, 
-                    pointer.current_location().y as i32, 
-                );
-
                 let (canvas_cx, canvas_cy) = self.cursor_to_canvas();
+
+                // Overlay and Top shells sit above canvas windows — check them first.
+                if let Some((surf, surf_pos)) = self.layer_surface_under(self.cursor_position, &[Layer::Overlay, Layer::Top]) {
+                    pointer.motion(
+                        self,
+                        Some((surf, surf_pos)),
+                        &MotionEvent { location: self.cursor_position, serial, time: event.time_msec() },
+                    );
+                    pointer.frame(self);
+                    return;
+                }
+
+                self.cursor_icon = self.cursor_icon_for(
+                    self.cursor_position.x as i32, 
+                    self.cursor_position.y as i32, 
+                );
 
                 let Some(window) = self.windows.iter().find(|cw| {
                     (!cw.is_scratchpad || cw.scratchpad_visible) &&
                     (cw.canvas_x..(cw.canvas_x + cw.base_width as f64)).contains(&canvas_cx) &&
                     (cw.canvas_y..(cw.canvas_y + cw.base_height as f64)).contains(&canvas_cy)
                 }) else {
-                    let mut result: Option<(WlSurface, Point<f64, Logical>)> = None; 
-                    {
-                        let layer_map = layer_map_for_output(self.space.outputs().next().unwrap());
-                        for layer in layer_map.layers() {
-                            let geo = layer_map.layer_geometry(layer).unwrap_or_default();
-
-                            let local: Point<f64, Logical> = Point::new(
-                                self.cursor_position.x - geo.loc.to_f64().x, 
-                                self.cursor_position.y - geo.loc.to_f64().y
-                            );
-                            if local.x >= 0.0 && local.y >= 0.0
-                                && local.x < geo.size.w as f64 && local.y < geo.size.h as f64 
-                            {
-                                if let Some((surf, surf_pos)) = layer.surface_under(local, WindowSurfaceType::ALL) {
-                                    result = Some((surf, surf_pos.to_f64() + geo.loc.to_f64()))
-                                } else {
-                                    result = Some((layer.wl_surface().clone(), geo.loc.to_f64()));
-                                }
-                            }
-                        }
-                    }
-                    if let Some((surf, global_pos)) = result {
-                        pointer.motion(
-                            self,
-                            Some((surf, global_pos)),
-                            &MotionEvent { 
-                                location: self.cursor_position, 
-                                serial, 
-                                time: event.time_msec() 
-                            }
-                        );
-                        pointer.frame(self);
-                        return;
-                    }
+                    // No canvas window - fall back to Bottom/Background shells or nothing.
+                    let result = self.layer_surface_under(self.cursor_position, &[Layer::Bottom, Layer::Background]);
                     pointer.motion(
                         self,
-                        None,
-                        &MotionEvent {
-                            location: self.cursor_position,
-                            serial,
-                            time: event.time_msec(),
-                        }
+                        result,
+                        &MotionEvent { location: self.cursor_position, serial, time: event.time_msec() },
                     );
                     pointer.frame(self);
                     return;
@@ -301,11 +313,19 @@ impl AeroWM {
                     },
                 );
                 self.sync_window_positions();
+                
                 pointer.frame(self);
+                // to allow focusing a subsurface
+                let root = {
+                    let mut s = under.0.clone();
+                    while let Some(parent) = get_parent(&s) {
+                        s = parent;
+                    }
+                    s
+                };
                 if let Some(window) = self.windows.iter().find(|cw| {
-                    cw.window
-                        .toplevel()
-                        .map_or(false, |t| t.wl_surface() == &under.0)
+                    cw.window.toplevel().map_or(false, |t| t.wl_surface() == &root)
+                    || cw.window.x11_surface().and_then(|s| s.wl_surface()).map_or(false, |s| s == root)
                 }) {
                     let window_id = window.id;
                     if self.layer_surfaces
@@ -349,14 +369,20 @@ impl AeroWM {
                 
                 if let Some((wl_surf, _)) = under {    
                     if let Some(window) = self.windows.iter().find(|cw| {
-                        cw.window   
-                            .toplevel()
-                            .map_or(false, |t| t.wl_surface() == &wl_surf)
+                        cw.window.toplevel().map_or(false, |t| t.wl_surface() == &wl_surf)
+                        || cw.window.x11_surface().and_then(|s| s.wl_surface()).map_or(false, |s| s == wl_surf)
                     }) {
                         let window_id = window.id;
-                        if self.config.hover_to_focus {
-                            keyboard.set_focus(self, Some(wl_surf.clone()), serial);
-                            self.focused_window_id = Some(window_id);
+                        if self.layer_surfaces
+                            .iter()
+                            .find(|surface|
+                                surface.cached_state().keyboard_interactivity == KeyboardInteractivity::Exclusive
+                            ).is_none()
+                        {
+                            if self.config.hover_to_focus {
+                                keyboard.set_focus(self, Some(wl_surf.clone()), serial);
+                                self.focused_window_id = Some(window_id);
+                            }
                         }
                     }
                 }
@@ -425,9 +451,6 @@ impl AeroWM {
                 if ButtonState::Pressed == button_state && !pointer.is_grabbed()
                     && button == BTN_LEFT && main_mod && under.is_some()
                 {
-                    eprintln!("drag attempt: cx={:.1} cy={:.1}", cx, cy);
-                    eprintln!("windows: {:?}", self.windows.iter().map(|w| (w.canvas_x, w.canvas_y, w.base_width,
-                    w.base_height)).collect::<Vec<_>>());
                     if let Some(window) = self.windows.iter().find(|cw| {
                         (cw.canvas_x..(cw.canvas_x + cw.base_width as f64)).contains(&cx) &&
                         (cw.canvas_y..(cw.canvas_y + cw.base_height as f64)).contains(&cy)
@@ -439,6 +462,7 @@ impl AeroWM {
                             pointer.current_location().y - window.canvas_y,
                         );
                         self.dragged_window = Some((window.id, offset));
+                        return;
                     } else {
                         eprintln!("drag: now window hit");
                     }
@@ -508,6 +532,35 @@ impl AeroWM {
                 }
                     
                 if ButtonState::Pressed == button_state && !pointer.is_grabbed()
+                    && button == BTN_RIGHT && !main_mod
+                {
+                    let hit = self.windows.iter().any(|cw| {
+                        (!cw.is_scratchpad || cw.scratchpad_visible) &&
+                        (cw.canvas_x..(cw.canvas_x + cw.base_width as f64)).contains(&cx) &&
+                        (cw.canvas_y..(cw.canvas_y + cw.base_height as f64)).contains(&cy)
+                    }) || self.layer_surface_under(self.cursor_position, &[Layer::Overlay, Layer::Top, Layer::Background, Layer::Bottom]).is_some();
+                    if !hit {
+                        let (output_name, local_sx, local_sy) = self
+                            .output_under_cursor()
+                            .and_then(|o| self.space.output_geometry(o).map(|g| (o.name(), g.loc)))
+                            .map(|(name, loc)| {
+                                (name,
+                                 self.cursor_position.x - loc.x as f64,
+                                 self.cursor_position.y - loc.y as f64)
+                            })
+                            .unwrap_or_else(|| {
+                                (String::new(), self.cursor_position.x, self.cursor_position.y)
+                            });
+                        self.emit_event(IpcEvent::CanvasRightClicked {
+                            x: cx, y: cy,
+                            sx: local_sx, sy: local_sy,
+                            output: output_name,
+                        });
+                        return;
+                    }
+                }
+
+                if ButtonState::Pressed == button_state && !pointer.is_grabbed()
                     && button == BTN_MIDDLE
                 {
                     if self.current_view_mode() == ViewMode::TreeView {
@@ -525,20 +578,42 @@ impl AeroWM {
                 } else if ButtonState::Pressed == button_state && !pointer.is_grabbed()
                     && button == BTN_LEFT && !main_mod
                 {
+                    let top_layer_hit = self.layer_surface_under(
+                        self.cursor_position,
+                        &[Layer::Overlay, Layer::Top],
+                    );
+                    if let Some((surf, _)) = top_layer_hit {
+                        keyboard.set_focus(self, Some(surf), serial);
+                        self.focused_window_id = None;
+                        pointer.button(self, &ButtonEvent { button, state: button_state, serial, time: event.time_msec() });
+                        pointer.frame(self);
+                        return;
+                    }
+
                     let px = pointer.current_location().x as i32;
                     let py = pointer.current_location().y as i32;
+                    let output_info: Vec<(String, Point<i32, Logical>, f64, f64, f64)> = self.space.outputs()
+                        .filter_map(|o| {
+                            let loc = self.space.output_geometry(o)?.loc;
+                            let vs = self.per_output_state.get(o)?;
+                            Some((o.name(), loc, vs.viewport_x, vs.viewport_y, vs.zoom))
+                        }).collect();
                     let found = self.windows.iter().rev().filter(|cw| !cw.is_scratchpad || cw.scratchpad_visible).find_map(|cw| {
                         match self.window_edge_at(cw, px, py) {
                             ResizeEdge::None => {
-                                let wx = ((cw.canvas_x - viewport_x) * zoom) as i32;
-                                let wy = ((cw.canvas_y - viewport_y) * zoom) as i32;
-                                let ww = cw.base_width as i32;
-                                let wh = cw.base_height as i32;
+                                let (_, loc, vx, vy, z) = output_info.iter()
+                                    .find(|(name, ..)| Some(name) == cw.output_name.as_ref())
+                                    .or_else(|| output_info.first())?;
+                                let wx = ((cw.canvas_x - vx) * z) as i32 + loc.x;
+                                let wy = ((cw.canvas_y - vy) * z) as i32 + loc.y;
+                                let ww = (cw.base_width as f64 * z) as i32;
+                                let wh = (cw.base_height as f64 * z) as i32;
                                 if px >= wx && px < wx + ww && py >= wy && py < wy + wh { Some((cw.id, ResizeEdge::None)) } else { None }
                             },
                             edge => Some((cw.id, edge)),
                         }
                     });
+                    
                     if let Some((cw_id, edge)) = found {
                         if edge != ResizeEdge::None {
                             let cw = self.windows.iter_mut().find(|w| w.id == cw_id).unwrap();
@@ -565,7 +640,6 @@ impl AeroWM {
                             };
                             pointer.set_grab(self, grab, serial, Focus::Clear);
                         } else {
-                            // cursor is over window body — focus it
                             if self.layer_surfaces
                                 .iter()
                                 .find(|surface| 
@@ -586,22 +660,43 @@ impl AeroWM {
                             }
                         }
                     } else {
-                        // cursor over empty canvas — deselect
-                        self.space.elements().for_each(|w| {
-                            w.set_activated(false);
-                            if let Some(t) = w.toplevel() { t.send_pending_configure(); }
-                        });
-                        if self.layer_surfaces
-                            .iter()
-                            .find(|surface| 
-                                surface.cached_state().keyboard_interactivity == KeyboardInteractivity::Exclusive
-                            ).is_none() 
-                        {
-                            keyboard.set_focus(self, Option::<WlSurface>::None, serial);
+                        let on_layer = under.as_ref().map(|(s, _)| {
+                            self.layer_surfaces.iter().any(|ls| ls.wl_surface() == s)
+                        }).unwrap_or(false);
+
+                        if on_layer {
+                            let surf = under.as_ref().map(|(s, _)| s.clone());
+                            self.space.elements().for_each(|w| {
+                                w.set_activated(false);
+                                if let Some(t) = w.toplevel() { t.send_pending_configure(); }
+                            });
                             self.focused_window_id = None;
+                            keyboard.set_focus(self, surf, serial);
+                        } else {
+                            self.space.elements().for_each(|w| {
+                                w.set_activated(false);
+                                if let Some(t) = w.toplevel() { t.send_pending_configure(); }
+                            });
+                            if self.layer_surfaces
+                                .iter()
+                                .find(|surface|
+                                    surface.cached_state().keyboard_interactivity == KeyboardInteractivity::Exclusive
+                                ).is_none()
+                            {
+                                keyboard.set_focus(self, Option::<WlSurface>::None, serial);
+                                self.focused_window_id = None;
+                            }
                         }
                     }            
                 } else if ButtonState::Pressed == button_state && !pointer.is_grabbed() && !self.active_drag {
+
+                    if let Some((surf, _)) = self.layer_surface_under(self.cursor_position, &[Layer::Overlay, Layer::Top]) {
+                        keyboard.set_focus(self, Some(surf), serial);
+                        self.focused_window_id = None;
+                        pointer.button(self, &ButtonEvent { button, state: button_state, serial, time: event.time_msec() });
+                        pointer.frame(self);
+                        return;
+                    }
 
                     let hit = self.windows.iter().find(|cw| {
                         (!cw.is_scratchpad || cw.scratchpad_visible) &&
