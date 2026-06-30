@@ -74,6 +74,9 @@ impl XwmHandler for AeroWM {
         self.windows.push(CanvasWindow {
             id,
             window,
+            texture: None,
+            is_dirty: false,
+            offscreen_tracker: None,
             canvas_x,
             canvas_y,
             target_x: canvas_x,

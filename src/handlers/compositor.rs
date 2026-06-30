@@ -82,6 +82,7 @@ impl CompositorHandler for AeroWM {
                         _ => {}
                     }
                 }
+                cw.is_dirty = true;
             }
             if self.layer_surfaces.iter().any(|s| s.wl_surface() == surface) {
                 let output = self.space.outputs().next().unwrap();

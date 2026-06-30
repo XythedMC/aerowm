@@ -57,6 +57,7 @@ pub fn init_winit(
     let line_prog  = rendering::compile_line(backend.renderer());
     let solid_prog = rendering::compile_solid(backend.renderer());
     let border_prog = rendering::compile_border(backend.renderer());
+    let clip_prog = rendering::compile_clip(backend.renderer());
 
     {
         let formats = backend.renderer().dmabuf_formats();
@@ -118,7 +119,7 @@ pub fn init_winit(
 
                         let overlays = rendering::build_render_elements(
                             &output_name,
-                            &state.windows,
+                            &mut state.windows,
                             &state.x11_override_redirect,
                             state.focused_window_id,
                             &state.space,
@@ -140,7 +141,8 @@ pub fn init_winit(
                             renderer, 
                             &line_prog, 
                             &solid_prog, 
-                            &border_prog
+                            &border_prog,
+                            &clip_prog,
                         );
 
                         if let Err(e) = smithay::desktop::space::render_output::<

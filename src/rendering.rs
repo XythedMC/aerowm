@@ -1,11 +1,11 @@
 use std::collections::HashMap;
 
 use smithay::{
-    backend::renderer::{
-            Color32F, element::{AsRenderElements, Kind, solid::{SolidColorBuffer, SolidColorRenderElement}, surface::WaylandSurfaceRenderElement, texture::{TextureBuffer, TextureRenderElement}, utils::RescaleRenderElement}, gles::{
-                GlesPixelProgram, GlesRenderer, GlesTexture, Uniform, UniformName, UniformType, element::PixelShaderElement
+    backend::{allocator::Fourcc, renderer::{
+            Bind, Color32F, Offscreen, damage::OutputDamageTracker, element::{AsRenderElements, Kind, solid::{SolidColorBuffer, SolidColorRenderElement}, surface::WaylandSurfaceRenderElement, texture::{TextureBuffer, TextureRenderElement}, utils::RescaleRenderElement}, gles::{
+                GlesPixelProgram, GlesRenderer, GlesTexProgram, GlesTexture, Uniform, UniformName, UniformType, element::{PixelShaderElement, TextureShaderElement}
             }
-        }, desktop::{Space, Window}, utils::{Logical, Point, Rectangle, Scale, Size, Transform}
+        }}, desktop::{Space, Window}, utils::{Logical, Point, Rectangle, Scale, Size, Transform},
 };
 
 use crate::{handlers::config::AeroWMConfig, state::{CanvasWindow, AeroWMElement, ViewMode}};
@@ -72,6 +72,32 @@ void main() {
 }   
 "#;
 
+pub const CLIP_FRAG: &str = r#"
+//_DEFINES_
+
+#if defined(EXTERNAL)
+#extension GL_OES_EGL_image_external : require
+uniform samplerExternalOES tex;
+#else
+uniform sampler2D tex;
+#endif
+
+precision highp float;
+uniform float alpha;
+varying vec2 v_coords;
+uniform vec2 elem_size;
+uniform float radius;
+
+void main() {
+    vec2 px = v_coords * elem_size;
+    vec2 p = px - elem_size / 2.0;
+    vec2 d = abs(p) - elem_size / 2.0 + vec2(radius);
+    float dist = length(max(d, 0.0)) + min(max(d.x, d.y), 0.0) - radius;
+    if (dist > 0.0) { discard; }
+    gl_FragColor = texture2D(tex, v_coords) * alpha;
+}
+"#;
+
 pub fn convert_color(color: [u8; 4]) -> [f32; 4] {
     let [r, g, b, a] = color;
     [r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0, a as f32 / 255.0]
@@ -113,6 +139,18 @@ pub fn compile_border(r: &mut GlesRenderer) -> Option<GlesPixelProgram> {
         ],
     )
     .map_err(|e| eprintln!("AeroWM: border shader compile failed: {e}"))
+    .ok()
+}
+
+pub fn compile_clip(r: &mut GlesRenderer) -> Option<GlesTexProgram> {
+        r.compile_custom_texture_shader(
+        CLIP_FRAG,
+        &[
+            UniformName::new("elem_size", UniformType::_2f),
+            UniformName::new("radius", UniformType::_1f),
+        ],
+    )
+    .map_err(|e| eprintln!("AeroWM: clip shader compile failed: {e}"))
     .ok()
 }
 
@@ -263,7 +301,7 @@ pub fn draw_cursor(
 
 pub fn build_render_elements(
     output_name: &Option<String>,
-    windows: &[CanvasWindow],
+    windows: &mut [CanvasWindow],
     or_windows: &[Window],
     focused_window_id: Option<u32>,
     space: &Space<Window>,
@@ -285,7 +323,8 @@ pub fn build_render_elements(
     renderer: &mut GlesRenderer,
     line_prog: &Option<GlesPixelProgram>, 
     solid_prog: &Option<GlesPixelProgram>,
-    border_prog: &Option<GlesPixelProgram>
+    border_prog: &Option<GlesPixelProgram>,
+    clip_prog: &Option<GlesTexProgram>,
 ) ->Vec<AeroWMElement> {
     // Assemble overlay elements for this frame.
     let mut overlays: Vec<AeroWMElement> = Vec::new();
@@ -315,7 +354,7 @@ pub fn build_render_elements(
         }
     }
 
-    let mut sorted_windows: Vec<&CanvasWindow> = windows.iter().collect();
+    let mut sorted_windows: Vec<&mut CanvasWindow> = windows.iter_mut().collect();
     sorted_windows.sort_by_key(|cw| std::cmp::Reverse(cw.z_index));
 
     for window in sorted_windows {
@@ -323,7 +362,7 @@ pub fn build_render_elements(
         if view_mode == ViewMode::Tiling && !tiling_visible_ids.contains(&window.id) && !(window.is_scratchpad && window.scratchpad_visible) {continue;}
         if view_mode == ViewMode::Fullscreen && !window.is_fullscreen { continue; }
         if window.is_scratchpad && !window.scratchpad_visible { continue; };
-        
+
         let sx = ((window.canvas_x - viewport_x) * zoom) as i32;
         let sy = ((window.canvas_y - viewport_y) * zoom) as i32;
         let screen_loc = Point::from((sx, sy));
@@ -335,20 +374,97 @@ pub fn build_render_elements(
             loc: screen_loc, 
             size: window.window.geometry().size
         };
+        // Damage tracking and texture handling
+        if window.texture.is_none() || window.is_dirty {
+            let new_tex = <GlesRenderer as Offscreen::<GlesTexture>>::create_buffer(
+                renderer, 
+                Fourcc::Abgr8888, 
+                geo.size.to_buffer(1, Transform::Normal)
+            );
+
+            let mut tex = match new_tex {
+                Ok(t) => t,
+                Err(e) => { eprintln!("AeroWM: offscreen texture failed: {e}"); continue; }
+            };
+            let new_tex = tex.clone();
+            let render_target = renderer.bind(&mut tex);
+
+            let mut target = match render_target {
+                Ok(t) => t,
+                Err(e) => { eprintln!("AeroWM: offscreen render target failed: {e}"); continue; }
+            };
+
+            window.offscreen_tracker = Some(Box::new(OutputDamageTracker::new(
+                geo.size.to_physical_precise_round(scale),
+                scale,
+                Transform::Normal,
+            )));
+            let tracker = window.offscreen_tracker.as_deref_mut().unwrap();
+
+            let offscreen_surface_phys = (Point::<i32, Logical>::from((0, 0)) - geom_offset).to_physical_precise_round(scale);
+            let surface_elements: Vec<WaylandSurfaceRenderElement<GlesRenderer>> = window.window
+                .render_elements(renderer, offscreen_surface_phys, Scale::from(scale), 1.0);
+
+            let _ = tracker.render_output(
+                renderer, 
+                &mut target, 
+                0, 
+                &surface_elements, 
+                Color32F::TRANSPARENT,
+            );
+
+            window.texture = Some(new_tex);
+            window.is_dirty = false;
+        }
+
+        if !window.is_fullscreen {
+            if let Some(prog) = clip_prog {
+                if let Some(texture) = window.texture.as_ref() {
+                    let buffer = TextureBuffer::from_texture(
+                        renderer,
+                        texture.clone(),
+                        1,
+                        Transform::Normal,
+                        None,
+                    );
+                    let texture_element = TextureRenderElement::from_texture_buffer(
+                        screen_loc.to_physical_precise_round(scale),
+                        &buffer,
+                        Some(1.0_f32),
+                        None,
+                        Some(geo.size),
+                        Kind::Unspecified,
+                    );
+                    let clip_elem = TextureShaderElement::new(
+                        texture_element,
+                        prog.clone(),
+                        vec![
+                            Uniform::new("elem_size", (geo.size.w as f32 * zoom as f32, geo.size.h as f32 * zoom as f32)),
+                            Uniform::new("radius", config.corner_rounding * zoom as f32),
+                        ]
+                    );
+                    overlays.push(AeroWMElement::ScaledTextureShader(
+                        RescaleRenderElement::from_element(clip_elem, phys_loc, Scale::from(zoom))
+                    ));
+                }
+            }
+        } else {
+            // fullscreen: render surface directly without clip
+            overlays.extend(
+                window.window.render_elements::<WaylandSurfaceRenderElement<GlesRenderer>>(
+                    renderer,
+                    surface_phys,
+                    Scale::from(scale),
+                    1.0,
+                ).into_iter().map(|e| AeroWMElement::ScaledSurface(
+                    RescaleRenderElement::from_element(e, phys_loc, Scale::from(zoom))
+                ))
+            );
+        }
         
         if let Some(prog) = &border_prog {
             overlays.push(AeroWMElement::Shader(focus_border_elements(focused_window_id, &config, zoom, prog, window, geo)));
         }
-        overlays.extend(
-            window.window.render_elements::<WaylandSurfaceRenderElement<GlesRenderer>>(
-                renderer,
-                surface_phys,
-                Scale::from(scale),
-                1.0,
-            ).into_iter().map(|e| AeroWMElement::ScaledSurface(
-                RescaleRenderElement::from_element(e, phys_loc, Scale::from(zoom))
-            ))
-        );
     }
 
     for w in or_windows {

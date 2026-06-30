@@ -11,15 +11,9 @@ use std::{
 use mlua::{Error, Lua};
 use smithay::{
     backend::{
-        allocator::{Fourcc, dmabuf::Dmabuf, gbm::{GbmAllocator, GbmDevice}}, 
-        drm::{DrmDevice, DrmDeviceFd, DrmEvent, compositor::{DrmCompositor, FrameFlags}, exporter::gbm::GbmFramebufferExporter}, 
-        renderer::{
-            Color32F, 
-            ImportMem, 
-            element::{solid::SolidColorRenderElement, surface::WaylandSurfaceRenderElement, texture::TextureRenderElement, utils::RescaleRenderElement}, 
-            gles::{GlesPixelProgram, GlesRenderer, GlesTexture, UniformName, UniformType, element::PixelShaderElement, ffi}
-        }, 
-        session::libseat::LibSeatSession
+        allocator::{Fourcc, dmabuf::Dmabuf, gbm::{GbmAllocator, GbmDevice}}, drm::{DrmDevice, DrmDeviceFd, DrmEvent, compositor::{DrmCompositor, FrameFlags}, exporter::gbm::GbmFramebufferExporter}, renderer::{
+            Color32F, ImportMem, damage::OutputDamageTracker, element::{solid::SolidColorRenderElement, surface::WaylandSurfaceRenderElement, texture::TextureRenderElement, utils::RescaleRenderElement}, gles::{GlesPixelProgram, GlesRenderer, GlesTexProgram, GlesTexture, UniformName, UniformType, element::{PixelShaderElement, TextureShaderElement}, ffi}
+        }, session::libseat::LibSeatSession
     }, desktop::{LayerSurface, PopupManager, Space, Window, WindowSurfaceType, layer_map_for_output}, input::{Seat, SeatState, keyboard::XkbConfig, pointer::CursorImageStatus}, output::Output, reexports::{
         calloop::{EventLoop, Interest, LoopSignal, Mode, PostAction, RegistrationToken, generic::Generic}, drm::control::crtc::Handle, wayland_protocols::xdg::shell::server::xdg_toplevel::ResizeEdge, wayland_server::{
             Display, 
@@ -51,6 +45,8 @@ smithay::backend::renderer::element::render_elements! {
     Surface = WaylandSurfaceRenderElement<GlesRenderer>,
     ScaledSurface = RescaleRenderElement<WaylandSurfaceRenderElement<GlesRenderer>>,
     Solid = SolidColorRenderElement,
+    TextureShader = TextureShaderElement,
+    ScaledTextureShader = RescaleRenderElement<TextureShaderElement>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Default)]
@@ -88,6 +84,7 @@ pub struct GpuData {
     pub line_prog: Option<GlesPixelProgram>,
     pub solid_prog: Option<GlesPixelProgram>,
     pub border_prog: Option<GlesPixelProgram>,
+    pub clip_prog: Option<GlesTexProgram>,
 }
 
 pub struct BackendData {
@@ -102,6 +99,9 @@ pub struct ViewportState {
     pub viewport_x: f64,
     pub viewport_y: f64,
     pub zoom: f64,
+    pub saved_tree_zoom: f64,
+    pub saved_tree_viewport_x: f64,
+    pub saved_tree_viewport_y: f64,
     pub view_mode: ViewMode,
     pub tiling_visible_ids: Vec<u32>,
 }
@@ -112,16 +112,26 @@ impl Default for ViewportState {
             viewport_x: 0.0,
             viewport_y: 0.0,
             zoom: 1.0,
+            saved_tree_zoom: 1.0,
+            saved_tree_viewport_x: 0.0,
+            saved_tree_viewport_y: 0.0,
             view_mode: ViewMode::default(),
             tiling_visible_ids: Vec::new(),
         }
     }
 }
 /// A window with its position on the infinite canvas and its place in the window tree.
-#[derive(Clone)]
+#[derive(Debug)]
 pub struct CanvasWindow {
     pub id: u32,
     pub window: Window,
+
+    /// The current GlesTexture of the window, used for damage tracking
+    pub texture: Option<GlesTexture>,
+    /// does the window need repainting
+    pub is_dirty: bool,
+    pub offscreen_tracker: Option<Box<OutputDamageTracker>>,
+
     /// Current animated position (lerped each frame toward target).
     pub canvas_x: f64,
     pub canvas_y: f64,
@@ -1096,7 +1106,7 @@ impl AeroWM {
 
                 let elements = build_render_elements(
                     &output_name,
-                    &self.windows,
+                    &mut self.windows,
                     &self.x11_override_redirect,
                     self.focused_window_id,
                     &self.space,
@@ -1118,7 +1128,8 @@ impl AeroWM {
                     renderer, 
                     &gpu_data.line_prog, 
                     &gpu_data.solid_prog, 
-                    &gpu_data.border_prog
+                    &gpu_data.border_prog,
+                    &gpu_data.clip_prog,
                 );
 
                 let render_frame_result = compositor.render_frame(

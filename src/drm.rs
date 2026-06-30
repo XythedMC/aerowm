@@ -52,6 +52,7 @@ fn open_gpu(
     let line_prog = rendering::compile_line(&mut renderer);
     let solid_prog = rendering::compile_solid(&mut renderer);
     let border_prog = rendering::compile_border(&mut renderer);
+    let clip_prog = rendering::compile_clip(&mut renderer);
 
     let resources = drm.resource_handles().expect("Failed to get DRM resources");
     let mut compositors: HashMap<Handle, GbmDrmCompositor> = HashMap::new();
@@ -127,11 +128,14 @@ fn open_gpu(
         output.create_global::<AeroWM>(&state.display_handle);
 
         state.space.map_output(&output, (pos_x, pos_y));
-        state.per_output_state.insert(output.clone(), ViewportState { 
-            viewport_x: pos_x as f64, 
-            viewport_y: pos_y as f64, 
-            zoom: 1.0, 
-            view_mode: ViewMode::Tiling, 
+        state.per_output_state.insert(output.clone(), ViewportState {
+            viewport_x: pos_x as f64,
+            viewport_y: pos_y as f64,
+            zoom: 1.0,
+            saved_tree_zoom: 1.0,
+            saved_tree_viewport_x: 0.0,
+            saved_tree_viewport_y: 0.0,
+            view_mode: ViewMode::Tiling,
             tiling_visible_ids: Vec::new(),
         });
 
@@ -189,6 +193,7 @@ fn open_gpu(
         line_prog,
         solid_prog,
         border_prog,
+        clip_prog,
     });
 }
 

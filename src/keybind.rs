@@ -380,13 +380,23 @@ impl AeroWM {
 
     fn switch_view(&mut self) {
         let current_view_mode = self.current_view_mode();
+        let mut restore_viewport: Option<(f64, f64)> = None;
         if let Some(output) = self.output_under_cursor().cloned() {
             if let Some(vs) = self.per_output_state.get_mut(&output) {
                 vs.view_mode = match current_view_mode {
                     ViewMode::Tiling => {
-                        self.zoom = 1.0;
-                        self.zoom_target = 1.0;
-                        self.zoom_anim_start = 1.0;
+                        let tree_zoom = vs.saved_tree_zoom;
+                        self.zoom = tree_zoom;
+                        self.zoom_target = tree_zoom;
+                        self.zoom_anim_start = tree_zoom;
+                        vs.zoom = tree_zoom;
+                        let svx = vs.saved_tree_viewport_x;
+                        let svy = vs.saved_tree_viewport_y;
+                        self.viewport_x = svx;
+                        self.viewport_y = svy;
+                        vs.viewport_x = svx;
+                        vs.viewport_y = svy;
+                        restore_viewport = Some((svx, svy));
                         ViewMode::TreeView
                     },
                     ViewMode::TreeView => {
@@ -394,9 +404,13 @@ impl AeroWM {
                             cw.tree_x = Some(cw.canvas_x);
                             cw.tree_y = Some(cw.canvas_y);
                         }
+                        vs.saved_tree_zoom = vs.zoom;
+                        vs.saved_tree_viewport_x = vs.viewport_x;
+                        vs.saved_tree_viewport_y = vs.viewport_y;
                         self.zoom = 1.0;
                         self.zoom_target = 1.0;
                         self.zoom_anim_start = 1.0;
+                        vs.zoom = 1.0;
                         ViewMode::Tiling
                     },
                     ViewMode::Fullscreen => { self.pre_fullscreen_viewport.as_ref().unwrap().view_mode },
@@ -404,6 +418,18 @@ impl AeroWM {
             }
         }
         self.apply_layout();
+        if let Some((vx, vy)) = restore_viewport {
+            self.viewport_x = vx;
+            self.viewport_y = vy;
+            self.viewport_target_x = vx;
+            self.viewport_target_y = vy;
+            if let Some(output) = self.output_under_cursor().cloned() {
+                if let Some(vs) = self.per_output_state.get_mut(&output) {
+                    vs.viewport_x = vx;
+                    vs.viewport_y = vy;
+                }
+            }
+        }
         let mode_str = match self.current_view_mode() {
             ViewMode::Tiling => "tiling".to_string(),
             ViewMode::TreeView => "tree".to_string(),
