@@ -1,31 +1,21 @@
 # AeroWM
 
-A Wayland compositor and window manager written in Rust, built on [Smithay](https://github.com/Smithay/smithay).
+A Wayland compositor built in Rust on top of [Smithay](https://github.com/Smithay/smithay).
 
-AeroWM organises windows in a tree structure. You can work in a focused **tiling** mode or zoom out to a **tree view** that shows the full window hierarchy on an infinite canvas.
+The idea is simple: your windows live on an infinite canvas in a tree. Day-to-day you work in normal tiling mode. When things get complex, you zoom out and see everything at once - the whole tree, every window, laid out in front of you. Pinch to zoom, drag to pan, then dive back in.
 
-## Features
+## What it does
 
-- **BSP tiling layout** - windows are split recursively into the available space
-- **Tree view** - zoom out to see and navigate the full window tree
-- **Infinite canvas** - pan and zoom freely in tree view
-- **Tree navigation** - move focus to parent, child, or sibling windows with keyboard shortcuts
-- **Edge resizing** - drag any window edge or corner to resize
-- **Drag to move** - hold the main modifier and drag to reposition windows freely
-- **Configurable keybinds** - bind keyboard shortcuts and mouse buttons to actions via Lua
-- **Lua config** - all settings and keybinds are defined in a single Lua file
-- **Borders with corner rounding** - customisable focused/unfocused border colours and rounded corners
-- **Hover to focus** - optional focus-follows-mouse
-- **Scratchpad** - floating windows that live outside the tree, toggled in and out of view
-- **Idle notify** - ext-idle-notify and zwp-idle-inhibit protocol support
-- **Screencopy** - ext-image-copy-capture protocol support for screenshot and screen recording tools
-- **Clipboard manager** - wlr-data-control protocol support
-- **IME support** - zwp-text-input-v3 and zwp-input-method-v2 protocol support
-- **XKB layout switching** - cycle between keyboard layouts with a keybind
-- **Pointer acceleration** - flat speed multiplier or custom Lua acceleration function
-- **Background** - solid colour, image, or custom GLSL shader
-- **XWayland support** - run X11 applications alongside native Wayland clients
-- **Areas** - define named rectangular regions on the canvas and jump to them instantly
+- **BSP tiling** - windows split the space automatically as you open them
+- **Tree view** - zoom out to the infinite canvas and see your whole window tree
+- **Rounded corners** - window content clipped to a rounded rectangle, not just the border
+- **Scratchpad** - a floating window outside the tree you can summon and dismiss anytime
+- **Areas** - mark regions of the canvas and jump between them instantly
+- **Backgrounds** - solid colour, wallpaper image, or a custom GLSL shader
+- **XWayland** - X11 apps work fine
+- **Lua config** - one file, hot-reloaded, no restart needed
+- **Trackpad gestures** - pinch to zoom, swipe to pan
+- **Everything else** - layer shell, screencopy, clipboard, IME, idle protocols, multi-monitor
 
 ## Requirements
 
@@ -188,22 +178,23 @@ Modifiers: `Ctrl`, `Alt`, `Shift`, `Super`. Mouse buttons: `left`, `right`, `mid
 | `toggle_scratchpad` | | Show or hide the scratchpad window |
 | `switch_layout` | | Cycle to the next XKB keyboard layout |
 
-## Planned / In Progress
+## 🗺️ Roadmap
 
-- ~~**XWayland support** - compatibility with X11 applications~~
-- ~~**Multi-output support** - multiple monitors~~
-- **wlr protocols** - layer shell (bars, docks, notifications), ~~screencopy~~, ~~data control~~, ~~idle notify~~, session lock
-- ~~**Background images and shaders** - image backgrounds and custom GLSL shaders~~
-- ~~**Trackpad support** - gestures for panning, zooming, and switching views~~
-- **Animations** - window open/close transitions
-- ~~**Scratchpad** - floating windows outside the tree~~
-- **Window rules** - auto-assign apps to positions or parents on launch
-- ~~**IPC** - full external control protocol over the Unix socket~~
-- ~~**Screenshot/screencopy** - wlr-screencopy protocol support~~
-- ~~**Clipboard manager support** - wlr-data-control protocol~~
-- ~~**Idle/lock screen** - ext-idle-notify and ext-session-lock support~~ (idle notify + inhibit done; session lock pending)
-- ~~**Config hot-reload** - reload the Lua config without restarting~~
-- ~~**Multi-language input** - IME support for non-Latin scripts~~
+- ✅ XWayland support
+- ✅ Multi-output / multi-monitor support
+- ✅ Background images and shaders
+- ✅ Trackpad gestures
+- ✅ Scratchpad
+- ✅ IPC - full external control over Unix socket
+- ✅ Screencopy - screenshot and screen recording support
+- ✅ Clipboard manager - wlr-data-control protocol
+- ✅ Idle notify and idle inhibit
+- ✅ Config hot-reload
+- ✅ IME / multi-language input
+- ✅ Layer shell - bars, docks, notifications
+- ⬜ Session lock - ext-session-lock protocol
+- ⬜ Animations - window open/close transitions
+- ⬜ Window rules - auto-assign apps to positions or parents on launch
 
 ## License
 
